@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { RuntimeConfig } from '../config';
 import { toIso, clampInt } from '../lib/time';
+import { ITEM_WITH_STATE_SELECT } from '../db/latestState';
 import { itemDto, parsePeriodMs, type ItemLatestRow } from './dto';
 
 type Ctx = { Bindings: Env; Variables: { cfg: RuntimeConfig } };
@@ -30,7 +31,7 @@ items.get('/:id', async (c) => {
 
 	const row = await c.env.DB.prepare(
 		`SELECT v.*, g.name AS game_name
-		 FROM item_latest v
+		 FROM ( ${ITEM_WITH_STATE_SELECT} ) v
 		 JOIN games g ON g.appid = v.appid
 		 WHERE v.item_id = ?`
 	)

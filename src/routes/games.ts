@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { RuntimeConfig } from '../config';
 import { toIso } from '../lib/time';
+import { ITEM_WITH_STATE_SELECT } from '../db/latestState';
 import { itemDto, parsePagination, parseSort, parseDirection, intFilter, parsePeriodMs, type ItemLatestRow } from './dto';
 
 type Ctx = { Bindings: Env; Variables: { cfg: RuntimeConfig } };
@@ -55,12 +56,13 @@ const GAME_LIST_SQL = `
 	  op.opportunities
 	FROM games g
 	LEFT JOIN (
-	  SELECT v.appid,
+	  SELECT i.appid,
 	         COUNT(*)                          AS items_count,
-	         SUM(COALESCE(v.sell_listings, 0)) AS sell_listings,
-	         SUM(COALESCE(v.volume_24h, 0))    AS volume_24h
-	  FROM item_latest v
-	  GROUP BY v.appid
+	         SUM(COALESCE(s.sell_listings, 0)) AS sell_listings,
+	         SUM(COALESCE(s.volume_24h, 0))    AS volume_24h
+	  FROM items i
+	  LEFT JOIN item_latest_state s ON s.item_id = i.id
+	  GROUP BY i.appid
 	) agg ON agg.appid = g.appid
 	LEFT JOIN (
 	  SELECT i.appid, COUNT(*) AS opportunities
@@ -87,7 +89,7 @@ games.get('/:appid', async (c) => {
 	if (!game) return c.json({ error: 'game_not_found', appid }, 404);
 
 	const topByVolume = await c.env.DB.prepare(
-		`SELECT v.* FROM item_latest v
+		`SELECT v.* FROM ( ${ITEM_WITH_STATE_SELECT} ) v
 		 WHERE v.appid = ? AND v.volume_24h IS NOT NULL
 		 ORDER BY v.volume_24h DESC, v.sell_listings DESC
 		 LIMIT 10`
@@ -96,7 +98,7 @@ games.get('/:appid', async (c) => {
 		.all<ItemLatestRow>();
 
 	const topBySpread = await c.env.DB.prepare(
-		`SELECT v.* FROM item_latest v
+		`SELECT v.* FROM ( ${ITEM_WITH_STATE_SELECT} ) v
 		 WHERE v.appid = ? AND v.sell_min_price IS NOT NULL AND v.buy_max_price IS NOT NULL AND v.buy_max_price > 0
 		 ORDER BY (ROUND(v.sell_min_price * 0.85) - v.buy_max_price) * 100.0 / v.buy_max_price DESC
 		 LIMIT 10`
@@ -157,12 +159,12 @@ games.get('/:appid/items', async (c) => {
 
 	const whereSql = where.join(' AND ');
 
-	const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM item_latest v WHERE ${whereSql}`)
+	const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM ( ${ITEM_WITH_STATE_SELECT} ) v WHERE ${whereSql}`)
 		.bind(...params)
 		.first<{ n: number }>();
 
 	const rows = await c.env.DB.prepare(
-		`SELECT v.* FROM item_latest v WHERE ${whereSql} ORDER BY ${orderBy} ${dir}, v.item_id ASC LIMIT ? OFFSET ?`
+		`SELECT v.* FROM ( ${ITEM_WITH_STATE_SELECT} ) v WHERE ${whereSql} ORDER BY ${orderBy} ${dir}, v.item_id ASC LIMIT ? OFFSET ?`
 	)
 		.bind(...params, limit, offset)
 		.all<ItemLatestRow>();

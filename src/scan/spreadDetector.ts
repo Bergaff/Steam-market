@@ -1,8 +1,7 @@
 /**
  * Worker 3 — spread detector (TZ §6, воркер 3). Runs every ~2 minutes.
  *
- * For every item with a fresh snapshot containing both sell_min_price and
- * buy_max_price:
+ * For every item with a fresh game scan AND fresh order-book data:
  *
  *   net_profit     = round(sell_min_price * 0.85) - buy_max_price
  *   net_profit_pct = net_profit / buy_max_price * 100
@@ -11,6 +10,11 @@
  *   net_profit_pct >= MIN_SPREAD_PCT (10)
  *   volume_24h     >= MIN_VOLUME_24H (5)
  *   buy_max_price  >= MIN_BUY_PRICE_CENTS (500 = 5 RUB)
+ *
+ * Freshness (works with delta-compressed snapshots):
+ *   - the item's game was successfully scanned within SNAPSHOT_MAX_AGE_MS;
+ *   - the order book was verified within DETAIL_FRESH_MS (items that fell out
+ *     of the top-N detail queue age out and their signals deactivate).
  *
  * Qualifying items are upserted into spread_opportunities (is_active=1);
  * previously active signals that no longer qualify are deactivated.
@@ -46,22 +50,23 @@ export function computeNetProfit(sellCents: number, buyCents: number): { netCent
 export async function detectSpreads(db: D1Database, cfg: RuntimeConfig): Promise<SpreadRunResult> {
 	const runAt = nowMs();
 	const started = Date.now();
-	const freshAfter = runAt - cfg.spread.snapshotMaxAgeMs;
+	const gameFreshAfter = runAt - cfg.spread.snapshotMaxAgeMs;
+	const detailFreshAfter = runAt - cfg.spread.detailFreshMs;
 
 	const rows = await db
 		.prepare(
-			`SELECT v.item_id, v.sell_min_price, v.buy_max_price, v.volume_24h
-			 FROM item_latest v
-			 JOIN games g ON g.appid = v.appid
+			`SELECT s.item_id, s.sell_min_price, s.buy_max_price, s.volume_24h
+			 FROM item_latest_state s
+			 JOIN games g ON g.appid = s.appid
 			 WHERE g.is_active = 1
-			   AND v.snapshot_at IS NOT NULL
-			   AND v.snapshot_at >= ?
-			   AND v.sell_min_price IS NOT NULL
-			   AND v.buy_max_price IS NOT NULL
-			   AND v.buy_max_price > 0
-			   AND v.buy_max_price >= ?`
+			   AND g.last_scan_at IS NOT NULL AND g.last_scan_at >= ?
+			   AND s.detail_at IS NOT NULL AND s.detail_at >= ?
+			   AND s.sell_min_price IS NOT NULL
+			   AND s.buy_max_price IS NOT NULL
+			   AND s.buy_max_price > 0
+			   AND s.buy_max_price >= ?`
 		)
-		.bind(freshAfter, cfg.spread.minBuyPriceCents)
+		.bind(gameFreshAfter, detailFreshAfter, cfg.spread.minBuyPriceCents)
 		.all<CandidateRow>();
 
 	const qualifying: { itemId: number; buy: number; sell: number; net: number; pct: number; volume: number | null }[] = [];

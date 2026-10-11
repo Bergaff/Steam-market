@@ -17,13 +17,20 @@ export interface RuntimeConfig {
 		itemsPerPage: number;
 		detailsTopN: number;
 		detailsPerTick: number;
+		/** Write a snapshot at least this often even if nothing moved (chart anchors). */
+		snapshotHeartbeatMs: number;
 	};
 	spread: {
 		minProfitPct: number;
 		minVolume24h: number;
 		minBuyPriceCents: number;
 		snapshotMaxAgeMs: number;
+		detailFreshMs: number;
 		detectorIntervalMs: number;
+	};
+	logging: {
+		/** Log 1 of every N successful Steam requests (errors always logged). */
+		successSampleN: number;
 	};
 	api: {
 		rateLimitPerMin: number;
@@ -70,13 +77,18 @@ export function loadConfig(env: Env): RuntimeConfig {
 			itemsPerPage: Math.min(100, Math.max(10, int(env.SCAN_ITEMS_PER_PAGE, 100))),
 			detailsTopN: int(env.DETAILS_TOP_N, 20),
 			detailsPerTick: int(env.DETAILS_PER_TICK, 6),
+			snapshotHeartbeatMs: int(env.SNAPSHOT_HEARTBEAT_MS, 4 * 60 * 60 * 1000),
 		},
 		spread: {
 			minProfitPct: int(env.MIN_SPREAD_PCT, 10),
 			minVolume24h: int(env.MIN_VOLUME_24H, 5),
 			minBuyPriceCents: int(env.MIN_BUY_PRICE_CENTS, 500),
 			snapshotMaxAgeMs: int(env.SNAPSHOT_MAX_AGE_MS, 3 * 60 * 60 * 1000),
+			detailFreshMs: int(env.DETAIL_FRESH_MS, 12 * 60 * 60 * 1000),
 			detectorIntervalMs: int(env.SPREAD_INTERVAL_MS, 2 * 60 * 1000),
+		},
+		logging: {
+			successSampleN: Math.max(1, int(env.LOG_SUCCESS_SAMPLE_N, 10)),
 		},
 		api: {
 			rateLimitPerMin: int(env.RATE_LIMIT_PER_MIN, 60),

@@ -38,6 +38,8 @@ export interface Env {
 	DETAILS_TOP_N?: string;
 	/** Max detail-scan items processed per scheduler tick. */
 	DETAILS_PER_TICK?: string;
+	/** Write a snapshot at least this often even when nothing moved, ms (D1 write saving). */
+	SNAPSHOT_HEARTBEAT_MS?: string;
 
 	// --- Spread detector ----------------------------------------------------
 	/** Minimum net profit percent to raise a signal. */
@@ -48,8 +50,12 @@ export interface Env {
 	MIN_BUY_PRICE_CENTS?: string;
 	/** Snapshots older than this are ignored by the detector, ms. */
 	SNAPSHOT_MAX_AGE_MS?: string;
+	/** Order-book data older than this is ignored by the detector, ms. */
+	DETAIL_FRESH_MS?: string;
 	/** How often the spread detector runs, ms. */
 	SPREAD_INTERVAL_MS?: string;
+	/** Log 1 of every N successful Steam requests (errors are always logged). */
+	LOG_SUCCESS_SAMPLE_N?: string;
 
 	// --- HTTP API ------------------------------------------------------------
 	/** Public API rate limit: requests per minute per IP. */

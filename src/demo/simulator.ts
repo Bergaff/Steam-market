@@ -143,6 +143,7 @@ export async function seedDemoData(db: D1Database, cfg: RuntimeConfig, opts: Dem
 		await db.batch([
 			db.prepare('DELETE FROM spread_opportunities'),
 			db.prepare('DELETE FROM scan_queue'),
+			db.prepare('DELETE FROM item_latest_state'),
 			db.prepare('DELETE FROM price_snapshots'),
 			db.prepare('DELETE FROM items'),
 			db.prepare('DELETE FROM scan_log'),
@@ -202,6 +203,10 @@ export async function seedDemoData(db: D1Database, cfg: RuntimeConfig, opts: Dem
 			const buyRatio = meta.profitable ? rand(0.6, 0.73) : rand(0.85, 0.97);
 			let volume = meta.profitable ? randInt(6, 90) : randInt(0, 40);
 
+			let lastBuy: number | null = null;
+			let lastBuyCount: number | null = null;
+			let lastMedian: number | null = null;
+
 			for (let step = historySteps; step >= 0; step--) {
 				const ts = now - step * historyIntervalMs;
 				// Random walk: +-4% per step, mean-reverting to basePrice.
@@ -223,7 +228,47 @@ export async function seedDemoData(db: D1Database, cfg: RuntimeConfig, opts: Dem
 						)
 						.bind(itemId, price, listings, buy, buyCount, isDetailedNow ? volume : null, median, ts)
 				);
+
+				if (step === 0) {
+					lastBuy = buy;
+					lastBuyCount = buyCount;
+					lastMedian = median;
+				}
 			}
+
+			// Latest-state row (denormalized) for list/detector queries.
+			stmts.push(
+				db
+					.prepare(
+						`INSERT INTO item_latest_state
+						   (item_id, appid, sell_min_price, sell_listings, buy_max_price, buy_orders_count, volume_24h, median_price, snapshot_at, detail_at, source, updated_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo', ?)
+						 ON CONFLICT(item_id) DO UPDATE SET
+						   sell_min_price = excluded.sell_min_price,
+						   sell_listings  = excluded.sell_listings,
+						   buy_max_price  = excluded.buy_max_price,
+						   buy_orders_count = excluded.buy_orders_count,
+						   volume_24h     = excluded.volume_24h,
+						   median_price   = excluded.median_price,
+						   snapshot_at    = excluded.snapshot_at,
+						   detail_at      = excluded.detail_at,
+						   source         = 'demo',
+						   updated_at     = excluded.updated_at`
+					)
+					.bind(
+						itemId,
+						game.appid,
+						price,
+						listings,
+						lastBuy,
+						lastBuyCount,
+						meta.isDetailed ? volume : null,
+						lastMedian,
+						now,
+						meta.isDetailed ? now : null,
+						now
+					)
+			);
 		}
 
 		for (const part of chunk(stmts, 80)) {
@@ -327,6 +372,40 @@ export async function runDemoTick(db: D1Database, cfg: RuntimeConfig): Promise<D
 						volume,
 						buy !== null ? Math.round((sell + buy) / 2) : null,
 						now,
+					)
+			);
+
+			// Keep the denormalized latest-state row in sync.
+			stmts.push(
+				db
+					.prepare(
+						`INSERT INTO item_latest_state
+						   (item_id, appid, sell_min_price, sell_listings, buy_max_price, buy_orders_count, volume_24h, median_price, snapshot_at, detail_at, source, updated_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo', ?)
+						 ON CONFLICT(item_id) DO UPDATE SET
+						   sell_min_price   = excluded.sell_min_price,
+						   sell_listings    = excluded.sell_listings,
+						   buy_max_price    = COALESCE(excluded.buy_max_price, item_latest_state.buy_max_price),
+						   buy_orders_count = COALESCE(excluded.buy_orders_count, item_latest_state.buy_orders_count),
+						   volume_24h       = COALESCE(excluded.volume_24h, item_latest_state.volume_24h),
+						   median_price     = COALESCE(excluded.median_price, item_latest_state.median_price),
+						   snapshot_at      = excluded.snapshot_at,
+						   detail_at        = COALESCE(excluded.detail_at, item_latest_state.detail_at),
+						   source           = 'demo',
+						   updated_at       = excluded.updated_at`
+					)
+					.bind(
+						item.id,
+						game.appid,
+						sell,
+						listings,
+						buy,
+						latest.buy_orders_count,
+						volume,
+						buy !== null ? Math.round((sell + buy) / 2) : null,
+						now,
+						buy !== null ? now : null,
+						now
 					)
 			);
 		}

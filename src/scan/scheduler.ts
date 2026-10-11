@@ -125,6 +125,9 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 			await setState(db, STATE_KEYS.lastSuccessfulScanAt, now);
 			await setState(db, STATE_KEYS.consecutive429, 0);
 		}
+		// Lifetime counters: one write per tick (not per request).
+		if (client.requests > 0) await incrementState(db, STATE_KEYS.totalSteamRequests, client.requests);
+		if (client.errors > 0) await incrementState(db, STATE_KEYS.totalSteamErrors, client.errors);
 	} catch (err) {
 		if (err instanceof RateLimitedError) {
 			// TZ §10: pause 30–60s after a 429; after a series of 429s — 5 minutes.
@@ -145,7 +148,6 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 	} finally {
 		summary.steamRequests = client.requests;
 		summary.steamErrors = client.errors;
-		if (client.requests > 0) await incrementState(db, STATE_KEYS.totalSteamRequests, 0); // touch updated_at
 		await setState(db, 'tick_lock_since', 0);
 		await setState(db, STATE_KEYS.lastTickAt, now);
 		summary.durationMs = Date.now() - started;
@@ -161,8 +163,8 @@ function summarizeForState(s: TickSummary): object {
 		ranAt: s.ranAt,
 		mode: s.mode,
 		skipped: s.skipped,
-		games: s.gamesScanned.map((g) => ({ appid: g.appid, status: g.status, items: g.itemsUpserted })),
-		details: s.details ? { ok: s.details.succeeded, failed: s.details.failed } : undefined,
+		games: s.gamesScanned.map((g) => ({ appid: g.appid, status: g.status, seen: g.itemsSeen, snaps: g.snapshotsInserted })),
+		details: s.details ? { ok: s.details.succeeded, failed: s.details.failed, wrote: s.details.written, flat: s.details.skippedUnchanged } : undefined,
 		spread: s.spread ? { active: s.spread.qualifying, off: s.spread.deactivated } : undefined,
 		reqs: s.steamRequests,
 		errs: s.steamErrors,

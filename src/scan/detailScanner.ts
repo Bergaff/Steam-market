@@ -5,14 +5,19 @@
  *   1. If `item_nameid` is unknown — parse it once from the listing page HTML;
  *   2. GET itemordershistogram → highest buy order + order counts;
  *   3. GET priceoverview → volume_24h + median_price;
- *   4. Merge results into the latest snapshot (same scan cycle) or insert a new one.
+ *   4. Write ONLY when the order book actually moved (delta compression) or
+ *      the heartbeat passed: merge into the latest snapshot / insert a new one
+ *      + refresh `item_latest_state`. Otherwise just touch `detail_at` (so the
+ *      spread detector knows the data is still being verified).
  */
 
 import type { RuntimeConfig } from '../config';
 import type { SteamClient } from '../steam/client';
 import { fetchItemNameid, fetchOrdersHistogram, fetchPriceOverview } from '../steam/endpoints';
-import { nowMs } from '../lib/time';
+import { chunk, nowMs } from '../lib/time';
 import type { WorkBudget } from './budget';
+import { needsDetailWrite } from './delta';
+import { upsertStateDetail, touchDetailAt, type LatestStateRow } from '../db/latestState';
 
 /** Snapshots younger than this are enriched in-place instead of inserting new rows. */
 const MERGE_WINDOW_MS = 15 * 60 * 1000;
@@ -20,13 +25,17 @@ const MERGE_WINDOW_MS = 15 * 60 * 1000;
 const RETRY_DELAY_MS = 10 * 60 * 1000;
 /** Items without an order book (no item_nameid) are re-checked rarely. */
 const NO_ORDERBOOK_DELAY_MS = 6 * 60 * 60 * 1000;
-/** Drop queue entries after this many failed attempts (until next list scan re-queues them). */
+/** Drop queue entries after this many failed attempts. */
 const MAX_ATTEMPTS = 4;
+/** Touch `detail_at` at most this often when values did not move. */
+const DETAIL_TOUCH_MIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
 export interface DetailScanResult {
 	processed: number;
 	succeeded: number;
 	failed: number;
+	written: number;
+	skippedUnchanged: number;
 	stoppedByBudget: boolean;
 	error?: string;
 }
@@ -46,7 +55,14 @@ export async function processDetailQueue(
 	budget: WorkBudget,
 	limit: number
 ): Promise<DetailScanResult> {
-	const result: DetailScanResult = { processed: 0, succeeded: 0, failed: 0, stoppedByBudget: false };
+	const result: DetailScanResult = {
+		processed: 0,
+		succeeded: 0,
+		failed: 0,
+		written: 0,
+		skippedUnchanged: 0,
+		stoppedByBudget: false,
+	};
 
 	const due = await db
 		.prepare(
@@ -104,57 +120,82 @@ export async function processDetailQueue(
 				throw new Error('both histogram and priceoverview returned nothing');
 			}
 
-			// --- 4. Merge into the latest snapshot or insert a new one ----------
 			const ts = nowMs();
-			const latest = await db
-				.prepare(
-					`SELECT id, snapshot_at FROM price_snapshots
-					 WHERE item_id = ? ORDER BY snapshot_at DESC, id DESC LIMIT 1`
-				)
-				.bind(row.item_id)
-				.first<{ id: number; snapshot_at: number }>();
-
 			const buyCents = hist?.highestBuyCents ?? null;
 			const sellCents = hist?.lowestSellCents ?? overview?.lowestPriceCents ?? null;
+			const volume = overview?.volume24h ?? null;
+			const median = overview?.medianPriceCents ?? null;
 
-			if (latest && ts - latest.snapshot_at <= MERGE_WINDOW_MS) {
-				await db
-					.prepare(
-						`UPDATE price_snapshots SET
-						   buy_max_price    = COALESCE(?, buy_max_price),
-						   buy_orders_count = COALESCE(?, buy_orders_count),
-						   volume_24h       = COALESCE(?, volume_24h),
-						   median_price     = COALESCE(?, median_price),
-						   sell_min_price   = COALESCE(sell_min_price, ?),
-						   source           = 'detail'
-						 WHERE id = ?`
-					)
-					.bind(
-						buyCents,
-						hist?.buyOrdersCount ?? null,
-						overview?.volume24h ?? null,
-						overview?.medianPriceCents ?? null,
-						sellCents,
-						latest.id
-					)
-					.run();
+			// --- 4. Delta gate: write only when the order book moved ------------
+			const state = await db
+				.prepare(
+					`SELECT item_id, appid, sell_min_price, sell_listings, buy_max_price, buy_orders_count,
+					        volume_24h, median_price, snapshot_at, detail_at, source, updated_at
+					 FROM item_latest_state WHERE item_id = ?`
+				)
+				.bind(row.item_id)
+				.first<LatestStateRow>();
+
+			const shouldWrite = needsDetailWrite(
+				state
+					? {
+							snapshot_at: state.snapshot_at,
+							sell_min_price: state.sell_min_price,
+							sell_listings: state.sell_listings,
+							buy_max_price: state.buy_max_price,
+							volume_24h: state.volume_24h,
+						}
+					: null,
+				{ buyCents, volume24h: volume, medianCents: median },
+				ts,
+				cfg.scan.snapshotHeartbeatMs
+			);
+
+			if (!shouldWrite) {
+				result.skippedUnchanged++;
+				// Keep the detector's freshness window honest with a cheap touch.
+				if (!state || state.detail_at === null || ts - state.detail_at >= DETAIL_TOUCH_MIN_INTERVAL_MS) {
+					await touchDetailAt(db, row.item_id, ts).run();
+				}
 			} else {
-				await db
+				const latest = await db
 					.prepare(
-						`INSERT INTO price_snapshots
-						   (item_id, sell_min_price, sell_listings, buy_max_price, buy_orders_count, volume_24h, median_price, snapshot_at, source)
-						 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'detail')`
+						`SELECT id, snapshot_at FROM price_snapshots
+						 WHERE item_id = ? ORDER BY snapshot_at DESC, id DESC LIMIT 1`
 					)
-					.bind(
-						row.item_id,
-						sellCents,
-						buyCents,
-						hist?.buyOrdersCount ?? null,
-						overview?.volume24h ?? null,
-						overview?.medianPriceCents ?? null,
-						ts
-					)
-					.run();
+					.bind(row.item_id)
+					.first<{ id: number; snapshot_at: number }>();
+
+				const stmts: D1PreparedStatement[] = [];
+				if (latest && ts - latest.snapshot_at <= MERGE_WINDOW_MS) {
+					stmts.push(
+						db
+							.prepare(
+								`UPDATE price_snapshots SET
+								   buy_max_price    = COALESCE(?, buy_max_price),
+								   buy_orders_count = COALESCE(?, buy_orders_count),
+								   volume_24h       = COALESCE(?, volume_24h),
+								   median_price     = COALESCE(?, median_price),
+								   sell_min_price   = COALESCE(sell_min_price, ?),
+								   source           = 'detail'
+								 WHERE id = ?`
+							)
+							.bind(buyCents, hist?.buyOrdersCount ?? null, volume, median, sellCents, latest.id)
+					);
+				} else {
+					stmts.push(
+						db
+							.prepare(
+								`INSERT INTO price_snapshots
+								   (item_id, sell_min_price, sell_listings, buy_max_price, buy_orders_count, volume_24h, median_price, snapshot_at, source)
+								 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'detail')`
+							)
+							.bind(row.item_id, sellCents, buyCents, hist?.buyOrdersCount ?? null, volume, median, ts)
+					);
+				}
+				stmts.push(upsertStateDetail(db, row.item_id, row.appid, buyCents, hist?.buyOrdersCount ?? null, volume, median, sellCents, ts));
+				await db.batch(stmts);
+				result.written++;
 			}
 
 			await db.prepare('DELETE FROM scan_queue WHERE item_id = ?').bind(row.item_id).run();
@@ -162,8 +203,7 @@ export async function processDetailQueue(
 			result.succeeded++;
 		} catch (err) {
 			if (err instanceof Error && err.name === 'RateLimitedError') {
-				// Global pause is handled by the scheduler — stop processing.
-				throw err;
+				throw err; // global pause is handled by the scheduler
 			}
 			result.processed++;
 			result.failed++;
@@ -186,10 +226,10 @@ export async function processDetailQueue(
 export async function enqueueTopItemsForDetails(db: D1Database, cfg: RuntimeConfig, appid: number): Promise<number> {
 	const rows = await db
 		.prepare(
-			`SELECT v.item_id, COALESCE(v.sell_listings, 0) AS listings
-			 FROM item_latest v
-			 WHERE v.appid = ?
-			 ORDER BY listings DESC, v.item_id ASC
+			`SELECT s.item_id, COALESCE(s.sell_listings, 0) AS listings
+			 FROM item_latest_state s
+			 WHERE s.appid = ?
+			 ORDER BY listings DESC, s.item_id ASC
 			 LIMIT ?`
 		)
 		.bind(appid, cfg.scan.detailsTopN)
@@ -204,6 +244,8 @@ export async function enqueueTopItemsForDetails(db: D1Database, cfg: RuntimeConf
 			)
 			.bind(r.item_id, appid, idx + 1)
 	);
-	if (stmts.length > 0) await db.batch(stmts);
+	for (const part of chunk(stmts, 90)) {
+		await db.batch(part);
+	}
 	return stmts.length;
 }

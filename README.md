@@ -116,7 +116,7 @@ npm run db:migrate:remote                            # 5. схема + сид и
 
 Готово: воркер отдаёт SPA и API по адресу `https://steam-market-analytics.<ваш-аккаунт>.workers.dev`, cron `* * * * *` запускается автоматически. Логи: `npm run cf:tail`.
 
-**Лимиты free-плана, которые учтены в коде:** ≤50 внешних запросов на invocation (бюджет скана по умолчанию 30), 30 сек CPU на scheduled-событие (вся тяжёлая работа — ожидание пейсинга, не CPU), D1 5 млн строк чтения/день (снапшоты прореживаются ретеншеном).
+**Лимиты free-плана, которые учтены в коде:** ≤50 внешних запросов на invocation (бюджет скана по умолчанию 30), 30 сек CPU на scheduled-событие (вся тяжёлая работа — ожидание пейсинга, не CPU), D1 100k записей/день (дельта-сжатие снимков — см. «Оптимизация под бесплатный D1» ниже), 5 млн чтений/день (списки читают компактную `item_latest_state`, ретеншн чистит историю).
 
 ---
 
@@ -136,7 +136,7 @@ npm run db:migrate:remote                            # 5. схема + сид и
 | `ADMIN_API_KEY` | secret `ADMIN_API_KEY` | — | Ключ `/api/v1/admin/*` (header `X-Admin-Key`) |
 | `TELEGRAM_*` | — | — | V3+ (бот с алертами — в планах) |
 
-Дополнительно: `MIN_REQUEST_INTERVAL_MS` (2500 — пейсинг запросов к Steam), `MAX_STEAM_REQUESTS_PER_RUN` (30), `SCAN_PAGES_PER_GAME` (10), `DETAILS_TOP_N` (20), `DETAILS_PER_TICK` (6), `SPREAD_INTERVAL_MS` (120000), `RATE_LIMIT_PER_MIN` (60), `RETRY_AFTER_429_MS` (60000), `LONG_PAUSE_MS` (300000), `RETENTION_DAYS` (35), `PROXY_URL` (пусто — хук для ротации IP), `DEMO_MODE` (0).
+Дополнительно: `MIN_REQUEST_INTERVAL_MS` (2500 — пейсинг запросов к Steam), `MAX_STEAM_REQUESTS_PER_RUN` (30), `SCAN_PAGES_PER_GAME` (10), `DETAILS_TOP_N` (20), `DETAILS_PER_TICK` (6), `SNAPSHOT_HEARTBEAT_MS` (14400000 = 4 ч — как часто писать снимок на плоском рынке), `DETAIL_FRESH_MS` (43200000 = 12 ч — свежесть buy-данных для детектора), `SPREAD_INTERVAL_MS` (120000), `LOG_SUCCESS_SAMPLE_N` (10), `RATE_LIMIT_PER_MIN` (60), `RETRY_AFTER_429_MS` (60000), `LONG_PAUSE_MS` (300000), `RETENTION_DAYS` (35), `PROXY_URL` (пусто — хук для ротации IP), `DEMO_MODE` (0).
 
 ---
 
@@ -186,13 +186,25 @@ curl "https://<worker>/api/v1/opportunities?min_profit_pct=15&sort=profit&limit=
 | `games` | Мониторимые игры: appid, tier, интервал, `next_scan_at`/`last_scan_at` |
 | `items` | Предметы (`UNIQUE(appid, hash_name)`), кэш `item_nameid` |
 | `price_snapshots` | Снимки цен: sell min/лоты, buy max/ордера, volume, медиана (индекс `item_id, snapshot_at DESC`) |
+| `item_latest_state` | **Одна строка на предмет** с последними значениями — все списки/фильтры/детектор читают её (маленькая таблица вместо оконных функций по всей истории) |
 | `spread_opportunities` | Сигналы: buy/sell/net/профит, `detected_at`, `is_active` (одна строка на предмет) |
 | `scan_queue` | Очередь воркера 2 (топ-N по лотам каждой игры) |
-| `scan_log` | Журнал каждого запроса к Steam (endpoint, статус, длительность, ошибка) |
+| `scan_log` | Журнал запросов к Steam: ошибки — всегда, успехи — сэмплированием 1/N |
 | `scheduler_state` | KV-состояние: паузы 429, счётчики, метки времени прогонов |
-| `item_latest` (VIEW) | Предмет + его последний снимок (оконная функция `ROW_NUMBER`) |
 
-Миграции: `migrations/0001_init.sql` (схема), `migrations/0002_seed_games.sql` (26 игр из ТЗ: 8 ядро/5 мин, 12 второй эшелон/15 мин, 6 экспериментальных/30 мин).
+Миграции: `migrations/0001_init.sql` (схема), `0002_seed_games.sql` (26 игр из ТЗ: 8 ядро/5 мин, 12 второй эшелон/15 мин, 6 экспериментальных/30 мин), `0003_item_latest_state.sql` (оптимизация записи/чтения D1).
+
+### Оптимизация под бесплатный D1 (важно!)
+
+Лимиты D1 free: **100 000 записанных строк/день**, 5 млн прочитанных/день, 500 МБ. «Наивный» сканер (снапшот каждого предмета каждый скан) дал бы >1 млн записей/день и упёрся бы в лимит за сутки. Поэтому:
+
+* **Дельта-сжатие снимков**: новый `price_snapshots` пишется, только если цена сдвинулась ≥1.5%, лоты ≥15% (мин. 5), либо buy/volume изменились (≥1%/≥10%), либо прошёл heartbeat `SNAPSHOT_HEARTBEAT_MS` (4 ч) — якорные точки для графиков на плоском рынке.
+* **`items`**: UPDATE только при смене имени/иконки; `last_seen` освежается не чаще раза в 6 часов.
+* **Очередь**: `INSERT OR IGNORE` — ноль записей при стабильном топе.
+* **Логи**: успехи 1/10 (`LOG_SUCCESS_SAMPLE_N`), ошибки всегда; счётчики запросов — одна запись на тик.
+* **Чтения**: списки/детектор ходят в `item_latest_state` (тысячи строк), а не в историю (миллионы).
+
+Ориентировочно 26 игр дают **~40–90 тыс. записей/день** — впритык к free-лимиту. Контроль: Dashboard → D1 → ваша база → метрики (rows written). Если mendekatiесь к лимиту — увеличьте `SNAPSHOT_HEARTBEAT_MS` до 6–8 ч, поднимите интервал tier-1 до 600–900 с (`PATCH /admin/games/{appid}`), уменьшите `SCAN_PAGES_PER_GAME` или отключите часть игр (`is_active=false`). На Workers Paid ($5/мес) лимита записей нет (тарификация ~$1/млн строк).
 
 ---
 

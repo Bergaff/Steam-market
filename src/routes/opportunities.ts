@@ -44,7 +44,7 @@ const BASE_SELECT = `
 	FROM spread_opportunities o
 	JOIN items i ON i.id = o.item_id
 	JOIN games g ON g.appid = i.appid
-	LEFT JOIN item_latest v ON v.item_id = o.item_id
+	LEFT JOIN item_latest_state v ON v.item_id = o.item_id
 `;
 
 function dto(row: OpportunityListRow) {
