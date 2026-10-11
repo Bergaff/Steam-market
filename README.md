@@ -105,6 +105,17 @@ npm run typecheck                  # tsc для воркера и фронтен
 
 ## Деплой на Cloudflare
 
+### Вариант A: Workers Builds (git-интеграция, рекомендуется)
+
+Dashboard → Workers & Pages → Create → Worker → **Connect to Git** → выбрать репозиторий и ветку. Настройки сборки leave по умолчанию: деплой-команда `npx wrangler deploy` сама соберёт фронтенд (в `wrangler.jsonc` есть `build.command: npm run build`), Node 22 подхватится из `.nvmrc`. Каждый push в подключённую ветку = автоматический redeploy.
+
+После первого успешного деплоя одноразово:
+1. Секрет: Worker → Settings → Variables and Secrets → **Secret** `ADMIN_API_KEY` (или `npx wrangler secret put ADMIN_API_KEY`);
+2. Миграции боевой D1: `npm run db:migrate:remote` (или вставить файлы `migrations/*.sql` в D1 → Console);
+3. Домен: включить `*.workers.dev` или привязать свой (Worker → Settings → Domains & Routes).
+
+### Вариант B: вручную через CLI
+
 ```bash
 npx wrangler login                                   # 1. авторизация
 npm run db:create                                    # 2. wrangler d1 create steam-market-db

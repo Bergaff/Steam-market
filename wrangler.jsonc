@@ -2,15 +2,20 @@
 	// Steam Market Analytics — Cloudflare Worker (API + static frontend)
 	//
 	// Деплой через Workers Builds (git):
-	//   Build command:            npm ci && npm run build
-	//   Build output / wrangler:  wrangler.jsonc (этот файл)
-	//   NODE_VERSION=22
+	//   Достаточно дефолтной команды деплоя `npx wrangler deploy` —
+	//   секция "build" ниже сама соберёт фронтенд (frontend/dist) перед деплоем.
+	//   NODE_VERSION=22 (определяется автоматически по .nvmrc).
 	// Одноразово после первого деплоя:
 	//   1. npx wrangler secret put ADMIN_API_KEY   (или Dashboard -> Settings -> Variables)
 	//   2. npm run db:migrate:remote               (схема + сид игр в боевую D1)
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "steam-market",
 	"main": "src/index.ts",
+	"build": {
+		// Runs automatically before `wrangler deploy` / `wrangler dev`
+		// (fixes Workers Builds failing on missing frontend/dist).
+		"command": "npm run build"
+	},
 	"compatibility_date": "2025-05-05",
 	"observability": {
 		"enabled": true
