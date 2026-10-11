@@ -1,14 +1,15 @@
 {
 	// Steam Market Analytics — Cloudflare Worker (API + static frontend)
 	//
-	// Первый деплой:
-	//   1. npx wrangler login
-	//   2. npm run db:create          -> скопируйте database_id в этот файл
-	//   3. npx wrangler secret put ADMIN_API_KEY
-	//   4. npm run deploy             (сборка фронта + деплой воркера)
-	//   5. npm run db:migrate:remote  (миграции + сид игр в боевую D1)
+	// Деплой через Workers Builds (git):
+	//   Build command:            npm ci && npm run build
+	//   Build output / wrangler:  wrangler.jsonc (этот файл)
+	//   NODE_VERSION=22
+	// Одноразово после первого деплоя:
+	//   1. npx wrangler secret put ADMIN_API_KEY   (или Dashboard -> Settings -> Variables)
+	//   2. npm run db:migrate:remote               (схема + сид игр в боевую D1)
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "steam-market-analytics",
+	"name": "steam-market",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-05-05",
 	"observability": {
@@ -26,8 +27,7 @@
 		{
 			"binding": "DB",
 			"database_name": "steam-market-db",
-			// ЗАМЕНИТЕ после `npm run db:create` (npx wrangler d1 create steam-market-db)
-			"database_id": "REPLACE-WITH-YOUR-D1-DATABASE-ID",
+			"database_id": "222b1b78-618f-4cb7-a6ba-6c76da47516e",
 			"migrations_dir": "migrations"
 		}
 	],
