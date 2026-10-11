@@ -1,0 +1,41 @@
+{
+  "name": "steam-market-analytics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Niche Steam Community Market analytics dashboard on Cloudflare Workers + D1",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n worker,web -c blue,green \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev:worker": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "dev:web": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace frontend",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace frontend",
+    "db:create": "wrangler d1 create steam-market-db",
+    "db:migrate:local": "wrangler d1 migrations apply steam-market-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply steam-market-db --remote",
+    "db:studio:local": "wrangler d1 insights steam-market-db --local",
+    "demo:seed": "curl -s -X POST http://127.0.0.1:8787/api/v1/admin/demo-data -H \"X-Admin-Key: dev-admin-key\" -H \"Content-Type: application/json\" | head -c 2000",
+    "cron:tick": "curl -s -X POST \"http://127.0.0.1:8787/cdn-cgi/local/scheduled\" | head -c 2000",
+    "cf:login": "wrangler login",
+    "cf:tail": "wrangler tail"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261006.1",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.40.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

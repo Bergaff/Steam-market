@@ -1,0 +1,10 @@
+# Локальные секреты для `wrangler dev` (файл .dev.vars в git не попадает).
+# Скопируйте: cp .dev.vars.example .dev.vars
+
+# Ключ админки (header X-Admin-Key) для /api/v1/admin/*
+ADMIN_API_KEY=dev-admin-key
+
+# Демо-режим: синтетические данные вместо реальных запросов к Steam
+# (полезно для локальной разработки без доступа к steamcommunity.com).
+# В проде оставляйте 0.
+DEMO_MODE=1

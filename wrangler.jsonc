@@ -1,0 +1,67 @@
+{
+	// Steam Market Analytics — Cloudflare Worker (API + static frontend)
+	//
+	// Первый деплой:
+	//   1. npx wrangler login
+	//   2. npm run db:create          -> скопируйте database_id в этот файл
+	//   3. npx wrangler secret put ADMIN_API_KEY
+	//   4. npm run deploy             (сборка фронта + деплой воркера)
+	//   5. npm run db:migrate:remote  (миграции + сид игр в боевую D1)
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "steam-market-analytics",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-05-05",
+	"observability": {
+		"enabled": true
+	},
+	"assets": {
+		"directory": "./frontend/dist",
+		"binding": "ASSETS",
+		"html_handling": "auto-trailing-slash",
+		"not_found_handling": "single-page-application",
+		// API и healthcheck всегда обрабатываются кодом воркера, а не ассетами
+		"run_worker_first": ["/api/*", "/health"]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "steam-market-db",
+			// ЗАМЕНИТЕ после `npm run db:create` (npx wrangler d1 create steam-market-db)
+			"database_id": "REPLACE-WITH-YOUR-D1-DATABASE-ID",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Планировщик: одна минута — «тикер», внутри него воркеры сами решают,
+	// какую игру сканировать (5/15/30 мин по тирам), какие предметы детализировать
+	// и когда запускать детектор спредов (каждые 2 минуты).
+	"triggers": {
+		"crons": ["* * * * *"]
+	},
+	// Не-секретная конфигурация (все значения — строки). Секреты: ADMIN_API_KEY через
+	// `wrangler secret put` (в проде) или .dev.vars (локально).
+	"vars": {
+		"STEAM_CURRENCY": "5",
+		"STEAM_LANGUAGE": "russian",
+		"STEAM_COUNTRY": "RU",
+		"SCAN_USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+		"MIN_REQUEST_INTERVAL_MS": "2500",
+		"MAX_STEAM_REQUESTS_PER_RUN": "30",
+		"MAX_RUN_WALL_MS": "540000",
+		"SCAN_PAGES_PER_GAME": "10",
+		"SCAN_ITEMS_PER_PAGE": "100",
+		"DETAILS_TOP_N": "20",
+		"DETAILS_PER_TICK": "6",
+		"MIN_SPREAD_PCT": "10",
+		"MIN_VOLUME_24H": "5",
+		"MIN_BUY_PRICE_CENTS": "500",
+		"SNAPSHOT_MAX_AGE_MS": "10800000",
+		"SPREAD_INTERVAL_MS": "120000",
+		"RATE_LIMIT_PER_MIN": "60",
+		"RETENTION_DAYS": "35",
+		"RETRY_AFTER_429_MS": "60000",
+		"LONG_PAUSE_AFTER_429_COUNT": "3",
+		"LONG_PAUSE_MS": "300000",
+		"PROXY_URL": "",
+		"DEMO_MODE": "0"
+	}
+}
