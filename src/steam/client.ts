@@ -82,9 +82,12 @@ export class SteamClient {
 		return this.rateLimited;
 	}
 
-	/** Wait until the pacing window allows the next request. */
+	/** Wait until the pacing window allows the next request (±15% jitter). */
 	private async pace(): Promise<void> {
-		const waitMs = this.lastRequestAt + this.cfg.scan.minRequestIntervalMs - Date.now();
+		const interval = this.cfg.scan.minRequestIntervalMs;
+		// Human-like rhythm: vary the pause by ±15% around the configured interval.
+		const jittered = Math.round(interval * 0.85 + jitter(interval * 0.3));
+		const waitMs = this.lastRequestAt + jittered - Date.now();
 		if (waitMs > 0) await sleep(waitMs);
 		this.lastRequestAt = Date.now();
 	}
@@ -98,12 +101,17 @@ export class SteamClient {
 	}
 
 	private headers(): HeadersInit {
+		// Steam_Language controls the market localization (names/prices).
+		// An optional owner-provided session cookie (secret) dramatically
+		// raises Steam's anonymous-IP rate limits; never requested from
+		// site visitors.
+		const baseCookies = `Steam_Language=${this.cfg.steam.language}; wants_mature_content=1`;
+		const cookie = this.cfg.steam.webCookie ? `${this.cfg.steam.webCookie}; ${baseCookies}` : baseCookies;
 		return {
 			'User-Agent': this.cfg.steam.userAgent,
 			Accept: 'application/json, text/html;q=0.9, */*;q=0.8',
 			'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.5',
-			// Steam_Language controls the market localization (names/prices).
-			Cookie: `Steam_Language=${this.cfg.steam.language}; wants_mature_content=1`,
+			Cookie: cookie,
 		};
 	}
 

@@ -16,12 +16,21 @@ export async function healthHandler(c: AppContext): Promise<Response> {
 	let pausedUntil = 0;
 	let queueDepth: number | null = null;
 	let lastTickSummary: unknown = null;
+	let consecutive429 = 0;
+	interface RecentError {
+		endpoint: string;
+		status: number | null;
+		error: string | null;
+		created_at_iso: string | null;
+	}
+	let recentErrors: RecentError[] = [];
 
 	try {
 		lastScan = (await db.prepare('SELECT MAX(last_scan_at) AS last FROM games').first<{ last: number | null }>())?.last ?? null;
 		const stateLast = await getStateInt(db, STATE_KEYS.lastSuccessfulScanAt);
 		if (stateLast > (lastScan ?? 0)) lastScan = stateLast;
 		pausedUntil = await getStateInt(db, STATE_KEYS.pausedUntil);
+		consecutive429 = await getStateInt(db, STATE_KEYS.consecutive429);
 		queueDepth = (await db.prepare('SELECT COUNT(*) AS n FROM scan_queue').first<{ n: number }>())?.n ?? null;
 		const summary = await getState(db, STATE_KEYS.lastTickSummary);
 		if (summary) {
@@ -31,6 +40,22 @@ export async function healthHandler(c: AppContext): Promise<Response> {
 				lastTickSummary = summary;
 			}
 		}
+		// Last failed Steam requests — the fastest way to see WHY scans stall
+		// (429 rate limits, TLS issues, unexpected shapes...). Harmless public
+		// data: endpoint name, HTTP status, error text, time.
+		const errRows = await db
+			.prepare(
+				`SELECT endpoint, status, error, created_at
+				 FROM scan_log WHERE ok = 0
+				 ORDER BY id DESC LIMIT 5`
+			)
+			.all<{ endpoint: string; status: number | null; error: string | null; created_at: number }>();
+		recentErrors = errRows.results.map((r) => ({
+			endpoint: r.endpoint,
+			status: r.status,
+			error: r.error,
+			created_at_iso: toIso(r.created_at),
+		}));
 	} catch {
 		dbOk = false;
 	}
@@ -45,12 +70,15 @@ export async function healthHandler(c: AppContext): Promise<Response> {
 		status: !dbOk ? 'down' : paused ? 'paused' : degraded ? 'degraded' : 'ok',
 		demo_mode: cfg.demoMode,
 		db: dbOk,
+		steam_cookie_configured: cfg.steam.webCookie !== null,
 		last_successful_scan_at: lastScan,
 		last_successful_scan_at_iso: toIso(lastScan),
 		last_successful_scan_age_ms: staleMs,
 		paused_until: paused ? pausedUntil : null,
 		paused_until_iso: paused ? toIso(pausedUntil) : null,
+		consecutive_429: consecutive429,
 		scan_queue_depth: queueDepth,
+		recent_errors: recentErrors,
 		last_tick: lastTickSummary,
 		time_iso: toIso(now),
 	};

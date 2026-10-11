@@ -8,6 +8,8 @@ export interface RuntimeConfig {
 		country: string;
 		userAgent: string;
 		proxyUrl: string | null;
+		/** Owner-provided session cookie (secret). Never requested from site visitors. */
+		webCookie: string | null;
 	};
 	scan: {
 		minRequestIntervalMs: number;
@@ -68,6 +70,7 @@ export function loadConfig(env: Env): RuntimeConfig {
 			country: str(env.STEAM_COUNTRY, 'RU'),
 			userAgent: str(env.SCAN_USER_AGENT, DEFAULT_USER_AGENT),
 			proxyUrl: env.PROXY_URL && env.PROXY_URL.length > 0 ? env.PROXY_URL : null,
+			webCookie: env.STEAM_WEB_COOKIE && env.STEAM_WEB_COOKIE.trim().length > 0 ? env.STEAM_WEB_COOKIE.trim() : null,
 		},
 		scan: {
 			minRequestIntervalMs: int(env.MIN_REQUEST_INTERVAL_MS, 2500),

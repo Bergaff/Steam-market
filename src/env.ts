@@ -22,6 +22,13 @@ export interface Env {
 	SCAN_USER_AGENT?: string;
 	/** Optional forwarding proxy for Steam requests: `${PROXY_URL}?url=<encoded>`. */
 	PROXY_URL?: string;
+	/**
+	 * OPTIONAL, owner-only: a Cookie header value for steamcommunity.com
+	 * (e.g. `steamLoginSecure=...`). Logged-in sessions get much higher rate
+	 * limits. Set via `wrangler secret put STEAM_WEB_COOKIE`. The public site
+	 * NEVER asks visitors for credentials — this is the deployer's own cookie.
+	 */
+	STEAM_WEB_COOKIE?: string;
 
 	// --- Scheduler pacing ---------------------------------------------------
 	/** Minimum delay between two Steam requests, ms (safe: 2000–3000). */

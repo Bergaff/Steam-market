@@ -49,13 +49,19 @@
 		"STEAM_LANGUAGE": "russian",
 		"STEAM_COUNTRY": "RU",
 		"SCAN_USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-		"MIN_REQUEST_INTERVAL_MS": "2500",
-		"MAX_STEAM_REQUESTS_PER_RUN": "30",
+		// Пейсинг подобран под анонимные запросы с IP Cloudflare: Steam отдаёт
+		// search/render по 10 строк и рано включает 429, поэтому интервал 3.5с
+		// (±15% джиттера в коде), до 60 запросов за тик (Workers Paid: лимит
+		// 1000 субзапросов) и до 20 страниц на игру (топ-200 предметов).
+		// Необязательный секрет STEAM_WEB_COOKIE (своя сессия steamcommunity)
+		// резко повышает лимиты Steam — см. README.
+		"MIN_REQUEST_INTERVAL_MS": "3500",
+		"MAX_STEAM_REQUESTS_PER_RUN": "60",
 		"MAX_RUN_WALL_MS": "540000",
-		"SCAN_PAGES_PER_GAME": "10",
+		"SCAN_PAGES_PER_GAME": "20",
 		"SCAN_ITEMS_PER_PAGE": "100",
 		"DETAILS_TOP_N": "20",
-		"DETAILS_PER_TICK": "6",
+		"DETAILS_PER_TICK": "8",
 		// D1 write saving: snapshot even for flat prices at least every 4h
 		"SNAPSHOT_HEARTBEAT_MS": "14400000",
 		"MIN_SPREAD_PCT": "10",

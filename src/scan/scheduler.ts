@@ -3,8 +3,8 @@
  *
  *   1. global pause check (after Steam 429s);
  *   2. spread detector — every SPREAD_INTERVAL_MS (2 min), pure DB work;
- *   3. worker 1 — scan ONE due game per tick (games are due per their own
- *      scan_interval_sec: tier1=5min, tier2=15min, tier3=30min);
+ *   3. worker 1 — scan up to TWO due games per tick (games are due per their
+ *      own scan_interval_sec: tier1=5min, tier2=15min, tier3=30min);
  *   4. worker 2 — process the detail queue with whatever request budget is left;
  *   5. housekeeping — once per day (retention cleanup).
  *
@@ -98,9 +98,9 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 			await setState(db, STATE_KEYS.lastSpreadRunAt, now);
 		}
 
-		// ------------------------------------------ 3. worker 1: one due game
+		// --------------------------------------- 3. worker 1: due games (up to 2)
 		if (budget.canRequest()) {
-			const dueGames = await pickDueGames(db, 1, now);
+			const dueGames = await pickDueGames(db, 2, now);
 			for (const game of dueGames) {
 				if (!budget.canRequest()) break;
 				const scanResult = await scanGameList(db, cfg, client, game, budget);
