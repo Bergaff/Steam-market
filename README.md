@@ -110,8 +110,12 @@ npm run typecheck                  # tsc для воркера и фронтен
 Dashboard → Workers & Pages → Create → Worker → **Connect to Git** → выбрать репозиторий и ветку. Настройки сборки leave по умолчанию: деплой-команда `npx wrangler deploy` сама соберёт фронтенд (в `wrangler.jsonc` есть `build.command: npm run build`), Node 22 подхватится из `.nvmrc`. Каждый push в подключённую ветку = автоматический redeploy.
 
 После первого успешного деплоя одноразово:
-1. Секрет: Worker → Settings → Variables and Secrets → **Secret** `ADMIN_API_KEY` (или `npx wrangler secret put ADMIN_API_KEY`);
-2. Миграции боевой D1: `npm run db:migrate:remote` (или вставить файлы `migrations/*.sql` в D1 → Console);
+1. **Инициализация боевой D1 (схема + 26 игр)** — самый простой способ, через сам воркер:
+   ```bash
+   curl -X POST https://steam-market.<ваш-субдомен>.workers.dev/api/v1/migrate
+   ```
+   Пустая база инициализируется без ключа (bootstrap, строго идемпотентно); повторный вызов после инициализации потребует `X-Admin-Key`. Альтернативы: `npm run db:migrate:remote` (CLI) или вставить `scripts/d1_console_setup.sql` в D1 → Console.
+2. Секрет: Worker → Settings → Variables and Secrets → **Secret** `ADMIN_API_KEY` (или `npx wrangler secret put ADMIN_API_KEY`) — нужен для админки;
 3. Домен: включить `*.workers.dev` или привязать свой (Worker → Settings → Domains & Routes).
 
 ### Вариант B: вручную через CLI
@@ -160,6 +164,7 @@ Base URL: `/api/v1`, формат JSON. Публичные эндпоинты о
 | Метод | URL | Описание |
 |---|---|---|
 | GET | `/api/v1/config` | Валюта, пороги сигналов, флаг демо-режима |
+| GET/POST | `/api/v1/migrate` | Статус схемы / инициализация пустой БД (bootstrap без ключа; повтор — с `X-Admin-Key`) |
 | GET | `/api/v1/games` | Все игры + агрегаты (предметы, лоты, объём, сигналы) |
 | GET | `/api/v1/games/{appid}` | Игра: статистика + топ-10 по объёму и по спреду |
 | GET | `/api/v1/games/{appid}/items` | Предметы с последними ценами. Параметры: `limit` (≤200), `offset`, `sort=volume\|price\|spread\|profit\|listings\|name`, `dir=asc\|desc`, `min_price_cents`, `min_volume`, `min_spread_pct` |

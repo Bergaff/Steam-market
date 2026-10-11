@@ -76,7 +76,12 @@ function safeEqual(a: string, b: string): boolean {
 	return diff === 0;
 }
 
-export async function adminAuth(c: AppContext, next: Next): Promise<Response | void> {
+/**
+ * Returns an error Response when the request lacks a valid X-Admin-Key,
+ * or null when authorized. Usable both as middleware and inline (e.g. the
+ * /migrate bootstrap endpoint authorizes conditionally).
+ */
+export function checkAdminKey(c: AppContext): Response | null {
 	const cfg = c.get('cfg');
 	if (!cfg.api.adminApiKey) {
 		return c.json(
@@ -88,5 +93,11 @@ export async function adminAuth(c: AppContext, next: Next): Promise<Response | v
 	if (!key || !safeEqual(key, cfg.api.adminApiKey)) {
 		return c.json({ error: 'unauthorized', message: 'Invalid or missing X-Admin-Key header' }, 401);
 	}
+	return null;
+}
+
+export async function adminAuth(c: AppContext, next: Next): Promise<Response | void> {
+	const denied = checkAdminKey(c);
+	if (denied) return denied;
 	await next();
 }
