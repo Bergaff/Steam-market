@@ -163,14 +163,48 @@ export interface SchemaStatus {
 	snapshots: number;
 }
 
-/** True when the core schema exists (probe: `games` table). */
-export async function isSchemaInitialized(db: D1Database): Promise<boolean> {
+/** Tables that must all exist for the schema to count as initialized. */
+export const REQUIRED_TABLES = [
+	'games',
+	'items',
+	'price_snapshots',
+	'spread_opportunities',
+	'scan_queue',
+	'scan_log',
+	'scheduler_state',
+	'item_latest_state',
+] as const;
+
+export interface SchemaProbe {
+	/** All required tables exist. */
+	complete: boolean;
+	existing: string[];
+	missing: string[];
+}
+
+/**
+ * Probe which required tables exist. A partially-initialized DB (e.g. a
+ * failed console paste that died mid-script) counts as NOT complete, so the
+ * idempotent bootstrap can repair it.
+ */
+export async function schemaProbe(db: D1Database): Promise<SchemaProbe> {
 	try {
-		const row = await db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'games'`).first();
-		return row !== null;
+		const placeholders = REQUIRED_TABLES.map(() => '?').join(', ');
+		const rows = await db
+			.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`)
+			.bind(...REQUIRED_TABLES)
+			.all<{ name: string }>();
+		const existing = new Set((rows.results ?? []).map((r) => r.name));
+		const missing = REQUIRED_TABLES.filter((t) => !existing.has(t));
+		return { complete: missing.length === 0, existing: [...existing], missing };
 	} catch {
-		return false;
+		return { complete: false, existing: [], missing: [...REQUIRED_TABLES] };
 	}
+}
+
+/** True when the core schema exists (all required tables). */
+export async function isSchemaInitialized(db: D1Database): Promise<boolean> {
+	return (await schemaProbe(db)).complete;
 }
 
 /** Apply all schema statements (idempotent) and return the resulting counts. */

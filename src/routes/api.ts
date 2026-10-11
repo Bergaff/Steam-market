@@ -7,7 +7,7 @@ import type { Env } from '../env';
 import type { RuntimeConfig } from '../config';
 import { setup, cors, rateLimit, checkAdminKey } from './middleware';
 import { currencyLabel } from './dto';
-import { isSchemaInitialized, applySchema, SCHEMA_STATEMENTS } from '../db/migrate';
+import { schemaProbe, applySchema, SCHEMA_STATEMENTS } from '../db/migrate';
 import games from './games';
 import items from './items';
 import opportunities from './opportunities';
@@ -23,31 +23,58 @@ api.use('*', cors as never);
 api.use('*', rateLimit as never);
 
 /**
- * GET /api/v1/migrate — schema status (safe to open in a browser).
- * POST /api/v1/migrate — initialize an EMPTY database (bootstrap: no key
- * needed, the embedded statements are strictly idempotent and non-destructive).
- * Once the schema exists, the admin key is required to re-run it.
+ * GET /api/v1/migrate — schema status; with ?apply=1 also initializes an
+ * incomplete database straight from a browser (no terminal, no D1 console).
+ * POST /api/v1/migrate — same bootstrap via curl/API clients.
+ *
+ * Bootstrap (anonymous) is allowed while ANY required table is missing — the
+ * embedded statements are strictly idempotent and non-destructive, so it also
+ * repairs a partially-created schema (e.g. a failed console paste). Once the
+ * schema is complete, re-applying requires the admin key.
  */
 api.get('/migrate', async (c) => {
-	const initialized = await isSchemaInitialized(c.env.DB);
-	if (!initialized) {
+	const probe = await schemaProbe(c.env.DB);
+	const apply = c.req.query('apply') === '1';
+
+	if (!probe.complete && apply) {
+		const status = await applySchema(c.env.DB);
 		return c.json({
-			initialized: false,
-			message: 'Database is empty. Run: curl -X POST ' + new URL(c.req.url).origin + '/api/v1/migrate',
-			statements: SCHEMA_STATEMENTS.length,
+			ok: true,
+			bootstrap: true,
+			repaired_missing_tables: probe.missing,
+			statements_applied: SCHEMA_STATEMENTS.length,
+			...status,
+			message: 'Database initialized: schema created and 26 games seeded. The cron scanner starts within a minute.',
 		});
 	}
+
+	if (!probe.complete) {
+		return c.json({
+			initialized: false,
+			missing_tables: probe.missing,
+			statements: SCHEMA_STATEMENTS.length,
+			message: 'Database is incomplete. Open this URL with ?apply=1 (browser) or send POST /api/v1/migrate to initialize.',
+		});
+	}
+
 	const games = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM games').first<{ n: number }>();
 	const items = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM items').first<{ n: number }>();
-	return c.json({ initialized: true, games: games?.n ?? 0, items: items?.n ?? 0 });
+	return c.json({
+		initialized: true,
+		games: games?.n ?? 0,
+		items: items?.n ?? 0,
+		message: apply
+			? 'Already initialized; re-applying requires POST with X-Admin-Key'
+			: 'Schema complete. POST with X-Admin-Key re-applies it (idempotent).',
+	});
 });
 
 api.post('/migrate', async (c) => {
-	const wasInitialized = await isSchemaInitialized(c.env.DB);
+	const probe = await schemaProbe(c.env.DB);
 
-	// Bootstrap mode: allow anonymous initialization of a completely empty DB.
-	// Everything else requires the admin key.
-	if (wasInitialized) {
+	// Bootstrap mode: allow anonymous initialization/repair while the schema
+	// is incomplete. A complete schema requires the admin key.
+	if (probe.complete) {
 		const denied = checkAdminKey(c);
 		if (denied) return denied;
 	}
@@ -55,10 +82,11 @@ api.post('/migrate', async (c) => {
 	const status = await applySchema(c.env.DB);
 	return c.json({
 		ok: true,
-		bootstrap: !wasInitialized,
+		bootstrap: !probe.complete,
+		repaired_missing_tables: probe.missing,
 		statements_applied: SCHEMA_STATEMENTS.length,
 		...status,
-		message: wasInitialized
+		message: probe.complete
 			? 'Schema re-applied (idempotent)'
 			: 'Database initialized: schema created and 26 games seeded. The cron scanner starts within a minute.',
 	});

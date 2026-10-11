@@ -110,11 +110,11 @@ npm run typecheck                  # tsc для воркера и фронтен
 Dashboard → Workers & Pages → Create → Worker → **Connect to Git** → выбрать репозиторий и ветку. Настройки сборки leave по умолчанию: деплой-команда `npx wrangler deploy` сама соберёт фронтенд (в `wrangler.jsonc` есть `build.command: npm run build`), Node 22 подхватится из `.nvmrc`. Каждый push в подключённую ветку = автоматический redeploy.
 
 После первого успешного деплоя одноразово:
-1. **Инициализация боевой D1 (схема + 26 игр)** — самый простой способ, через сам воркер:
-   ```bash
-   curl -X POST https://steam-market.<ваш-субдомен>.workers.dev/api/v1/migrate
+1. **Инициализация боевой D1 (схема + 26 игр)** — просто откройте в браузере:
    ```
-   Пустая база инициализируется без ключа (bootstrap, строго идемпотентно); повторный вызов после инициализации потребует `X-Admin-Key`. Альтернативы: `npm run db:migrate:remote` (CLI) или вставить `scripts/d1_console_setup.sql` в D1 → Console.
+   https://steam-market.<ваш-субдомен>.workers.dev/api/v1/migrate?apply=1
+   ```
+   Пустая или **частично созданная** база достраивается без ключа (строго идемпотентно, ничего не удаляет); когда схема полная — повтор требует `X-Admin-Key` (POST). Альтернативы: `curl -X POST .../api/v1/migrate`, `npm run db:migrate:remote` или вставить `scripts/d1_console_setup.sql` в D1 → Console (скрипт без комментариев — веб-консоль схлопывает строки, и inline-комментарии `--` ломали запрос).
 2. Секрет: Worker → Settings → Variables and Secrets → **Secret** `ADMIN_API_KEY` (или `npx wrangler secret put ADMIN_API_KEY`) — нужен для админки;
 3. Домен: включить `*.workers.dev` или привязать свой (Worker → Settings → Domains & Routes).
 
