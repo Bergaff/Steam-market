@@ -45,6 +45,8 @@ export interface RuntimeConfig {
 		retryAfterMs: number;
 		longPauseAfterCount: number;
 		longPauseMs: number;
+		/** Cap for the exponential 429 backoff (longPauseMs * 2^(hits-after)). */
+		longPauseMaxMs: number;
 	};
 	demoMode: boolean;
 }
@@ -104,6 +106,7 @@ export function loadConfig(env: Env): RuntimeConfig {
 			retryAfterMs: int(env.RETRY_AFTER_429_MS, 60_000),
 			longPauseAfterCount: int(env.LONG_PAUSE_AFTER_429_COUNT, 3),
 			longPauseMs: int(env.LONG_PAUSE_MS, 5 * 60 * 1000),
+			longPauseMaxMs: int(env.LONG_PAUSE_MAX_MS, 60 * 60 * 1000),
 		},
 		demoMode: str(env.DEMO_MODE, '0') === '1',
 	};

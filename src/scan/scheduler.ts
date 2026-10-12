@@ -43,6 +43,25 @@ export interface TickSummary {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Pause duration after N consecutive 429s (TZ §10 extended).
+ *
+ * hits < after:      max(Retry-After, RETRY_AFTER_429_MS)   — 60s
+ * hits >= after:     LONG_PAUSE_MS * 2^(hits-after), capped — 5→10→20→40→60min
+ *
+ * The exponential tail matters in production: Steam blocks Cloudflare IPs
+ * for hours once the anonymous budget is blown, and hammering a blocked IP
+ * every 5 minutes only prolongs the block. Backing off to an hourly probe
+ * lets the IP cool down; the counter resets after the first clean tick.
+ */
+export function compute429PauseMs(cfg: RuntimeConfig, hits: number, retryAfterMs: number): number {
+	const rl = cfg.rateLimitResponse;
+	if (hits < rl.longPauseAfterCount) return Math.max(retryAfterMs, rl.retryAfterMs);
+	const steps = hits - rl.longPauseAfterCount;
+	const doubled = rl.longPauseMs * 2 ** Math.min(steps, 10);
+	return Math.max(retryAfterMs, Math.min(doubled, rl.longPauseMaxMs));
+}
+
 export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Promise<TickSummary> {
 	const started = Date.now();
 	const now = nowMs();
@@ -130,13 +149,11 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 		if (client.errors > 0) await incrementState(db, STATE_KEYS.totalSteamErrors, client.errors);
 	} catch (err) {
 		if (err instanceof RateLimitedError) {
-			// TZ §10: pause 30–60s after a 429; after a series of 429s — 5 minutes.
+			// TZ §10: pause 30–60s after a 429; after a series of 429s — 5 minutes,
+			// then exponential backoff (10/20/40/60min) while the block persists.
 			const hits = (await getStateInt(db, STATE_KEYS.consecutive429)) + 1;
 			await setState(db, STATE_KEYS.consecutive429, hits);
-			const pauseMs =
-				hits >= cfg.rateLimitResponse.longPauseAfterCount
-					? cfg.rateLimitResponse.longPauseMs
-					: Math.max(err.retryAfterMs, cfg.rateLimitResponse.retryAfterMs);
+			const pauseMs = compute429PauseMs(cfg, hits, err.retryAfterMs);
 			await setState(db, STATE_KEYS.pausedUntil, now + pauseMs);
 			summary.pausedUntil = now + pauseMs;
 			summary.error = `rate limited (consecutive 429: ${hits}), paused for ${pauseMs}ms`;

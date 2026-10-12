@@ -81,6 +81,8 @@ export interface Env {
 	LONG_PAUSE_AFTER_429_COUNT?: string;
 	/** Long pause after repeated 429s, ms (TZ §10: 5 minutes). */
 	LONG_PAUSE_MS?: string;
+	/** Cap for the exponential 429 backoff, ms (production: Steam blocks CF IPs for hours). */
+	LONG_PAUSE_MAX_MS?: string;
 
 	// --- Demo mode -----------------------------------------------------------
 	/** "1" = serve synthetic data instead of hitting Steam (local previews). */
