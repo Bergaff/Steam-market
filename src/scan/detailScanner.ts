@@ -14,6 +14,7 @@
 import type { RuntimeConfig } from '../config';
 import type { SteamClient } from '../steam/client';
 import { fetchItemNameid, fetchOrdersHistogram, fetchPriceOverview } from '../steam/endpoints';
+import { isWrongCurrency, steamCurrencyToIso } from '../steam/parse';
 import { chunk, nowMs } from '../lib/time';
 import type { WorkBudget } from './budget';
 import { needsDetailWrite } from './delta';
@@ -36,6 +37,8 @@ export interface DetailScanResult {
 	failed: number;
 	written: number;
 	skippedUnchanged: number;
+	/** Items whose Steam response arrived in a currency other than configured. */
+	currencyMismatches: number;
 	stoppedByBudget: boolean;
 	error?: string;
 }
@@ -61,8 +64,11 @@ export async function processDetailQueue(
 		failed: 0,
 		written: 0,
 		skippedUnchanged: 0,
+		currencyMismatches: 0,
 		stoppedByBudget: false,
 	};
+
+	const expectedIso = steamCurrencyToIso(cfg.steam.currency);
 
 	const due = await db
 		.prepare(
@@ -118,6 +124,21 @@ export async function processDetailQueue(
 
 			if (!hist && !overview) {
 				throw new Error('both histogram and priceoverview returned nothing');
+			}
+
+			// --- currency guard (see listScanner): never mix currencies ----------
+			// A USD buy order against a RUB sell price (or vice versa) makes the
+			// spread formula produce garbage. Retry the item much later; this is
+			// a configuration problem, so attempts are not burned.
+			const detectedCur = hist?.currency ?? overview?.currency ?? null;
+			if (isWrongCurrency(detectedCur, expectedIso)) {
+				result.processed++;
+				result.currencyMismatches++;
+				await db
+					.prepare('UPDATE scan_queue SET due_at = ?, last_error = ? WHERE item_id = ?')
+					.bind(nowMs() + NO_ORDERBOOK_DELAY_MS, `currency mismatch: got ${detectedCur}, expected ${expectedIso}`, row.item_id)
+					.run();
+				continue;
 			}
 
 			const ts = nowMs();

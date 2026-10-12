@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { RuntimeConfig } from '../config';
-import { setup, cors, rateLimit, checkAdminKey } from './middleware';
+import { setup, cors, rateLimit, checkAdminKey, type AppContext } from './middleware';
 import { currencyLabel } from './dto';
 import { schemaProbe, applySchema, SCHEMA_STATEMENTS } from '../db/migrate';
 import games from './games';
@@ -92,6 +92,59 @@ api.post('/migrate', async (c) => {
 	});
 });
 
+/**
+ * GET|POST /api/v1/system/wipe-market-data?key=<ADMIN_API_KEY>&confirm=1
+ *
+ * Deletes ALL collected market data (price snapshots, latest state, spread
+ * signals, detail queue) but keeps games, items and their cached nameids.
+ * Used to clear poisoned data — e.g. prices recorded in the wrong currency.
+ * The admin key is accepted via header OR query param so the owner can run
+ * it straight from a browser (documented in README).
+ */
+async function wipeMarketDataHandler(c: AppContext): Promise<Response> {
+	const denied = checkAdminKey(c, { allowQueryKey: true });
+	if (denied) return denied;
+
+	if (c.req.query('confirm') !== '1') {
+		return c.json(
+			{
+				error: 'confirm_required',
+				message:
+					'This DELETES all price history, latest state, spread signals and the detail queue (games/items are kept). Re-run with &confirm=1 appended.',
+			},
+			400
+		);
+	}
+
+	const db = c.env.DB;
+	const countOf = async (table: string): Promise<number> =>
+		(await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n ?? 0;
+
+	const deleted = {
+		price_snapshots: await countOf('price_snapshots'),
+		spread_opportunities: await countOf('spread_opportunities'),
+		scan_queue: await countOf('scan_queue'),
+		item_latest_state: await countOf('item_latest_state'),
+	};
+
+	await db.batch([
+		db.prepare('DELETE FROM price_snapshots'),
+		db.prepare('DELETE FROM spread_opportunities'),
+		db.prepare('DELETE FROM scan_queue'),
+		db.prepare('DELETE FROM item_latest_state'),
+		db.prepare('UPDATE games SET next_scan_at = 0, last_scan_at = NULL, last_scan_status = NULL'),
+	]);
+
+	return c.json({
+		ok: true,
+		deleted,
+		message: 'Market data wiped; games re-scan from scratch within a minute (items and cached nameids are kept).',
+	});
+}
+
+api.get('/system/wipe-market-data', wipeMarketDataHandler);
+api.post('/system/wipe-market-data', wipeMarketDataHandler);
+
 /** GET /api/v1/config — public client config (currency, thresholds, demo flag). */
 api.get('/config', (c) => {
 	const cfg = c.get('cfg');
@@ -121,6 +174,7 @@ api.get('/', (c) =>
 		endpoints: [
 			'GET /api/v1/config',
 			'GET|POST /api/v1/migrate  (bootstrap empty DB / re-apply schema with X-Admin-Key)',
+			'GET|POST /api/v1/system/wipe-market-data?key=...&confirm=1  (clear poisoned price data, admin key)',
 			'GET /api/v1/games',
 			'GET /api/v1/games/:appid',
 			'GET /api/v1/games/:appid/items?limit&offset&sort&dir&min_price_cents&min_volume&min_spread_pct',

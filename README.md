@@ -156,6 +156,21 @@ npm run db:migrate:remote                            # 5. схема + сид и
 
 С cookie имеет смысл перейти на быстрый профиль (Settings → Variables или `wrangler.jsonc`): `MIN_REQUEST_INTERVAL_MS=3500`, `MAX_STEAM_REQUESTS_PER_RUN=60`, `SCAN_PAGES_PER_GAME=20`, `DETAILS_PER_TICK=8`.
 
+### Цены не в той валюте (например, USD вместо RUB)
+
+Steam определяет валюту анонимного запроса по гео-локации IP, и параметр `currency=5` для датацентровых IP может игнорироваться — в ответах приходят доллары. Писать их в БД как копейки нельзя (история и формула спреда теряют смысл), поэтому в сканерах стоит **валютный guard**:
+
+- `search/render`: валюта определяется по `sell_price_text` каждой строки; при несовпадении с `STEAM_CURRENCY` скан игры прерывается со статусом **`currency_mismatch`** (виден на странице игры и в `/health → last_tick`), цены не пишутся, повтор через час;
+- `itemordershistogram` / `priceoverview`: валюта определяется по `price_prefix`/`price_suffix` и локализованным строкам; при несовпадении предмет откладывается на 6 часов (`scan_queue.last_error = currency mismatch: ...`), счётчик виден в `/health → last_tick.details.currencyMismatches`.
+
+Лечение — `STEAM_WEB_COOKIE` аккаунта **с валютой RUB** (проверить валюту аккаунта: store.steampowered.com → «Об аккаунте»). Если guard сработал и в БД успели попасть данные в неверной валюте, очистите их (игры, предметы и кэш nameid сохраняются; сканирование начнётся заново в течение минуты):
+
+```
+https://steam-market.<ваш-субдомен>.workers.dev/api/v1/system/wipe-market-data?key=<ADMIN_API_KEY>&confirm=1
+```
+
+(можно открыть прямо в браузере; требует секрет `ADMIN_API_KEY`; без `confirm=1` ничего не удаляет). Ключ в URL — осознанный компромисс для управления без терминала; при желании после очистки его можно сменить.
+
 ---
 
 ## Конфигурация (соответствие `.env` из ТЗ)

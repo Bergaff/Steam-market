@@ -81,7 +81,7 @@ function safeEqual(a: string, b: string): boolean {
  * or null when authorized. Usable both as middleware and inline (e.g. the
  * /migrate bootstrap endpoint authorizes conditionally).
  */
-export function checkAdminKey(c: AppContext): Response | null {
+export function checkAdminKey(c: AppContext, opts: { allowQueryKey?: boolean } = {}): Response | null {
 	const cfg = c.get('cfg');
 	if (!cfg.api.adminApiKey) {
 		return c.json(
@@ -89,7 +89,9 @@ export function checkAdminKey(c: AppContext): Response | null {
 			503
 		);
 	}
-	const key = c.req.header('X-Admin-Key');
+	// Query-param key is only accepted by endpoints that must be operable
+	// straight from a browser (owner convenience, documented in README).
+	const key = c.req.header('X-Admin-Key') ?? (opts.allowQueryKey ? c.req.query('key') : undefined);
 	if (!key || !safeEqual(key, cfg.api.adminApiKey)) {
 		return c.json({ error: 'unauthorized', message: 'Invalid or missing X-Admin-Key header' }, 401);
 	}

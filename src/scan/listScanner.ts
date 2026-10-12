@@ -16,6 +16,7 @@ import type { RuntimeConfig } from '../config';
 import type { SteamClient } from '../steam/client';
 import { fetchSearchRender } from '../steam/endpoints';
 import type { ParsedMarketItem } from '../steam/parse';
+import { detectCurrency, isWrongCurrency, steamCurrencyToIso } from '../steam/parse';
 import { chunk, nowMs } from '../lib/time';
 import type { WorkBudget } from './budget';
 import { needsSnapshot } from './delta';
@@ -35,7 +36,7 @@ export interface GameRow {
 
 export interface ListScanResult {
 	appid: number;
-	status: 'ok' | 'partial' | 'error' | 'rate_limited';
+	status: 'ok' | 'partial' | 'error' | 'rate_limited' | 'currency_mismatch';
 	pagesFetched: number;
 	itemsSeen: number;
 	itemsInserted: number;
@@ -101,6 +102,7 @@ export async function scanGameList(
 	};
 
 	try {
+		const expectedIso = steamCurrencyToIso(cfg.steam.currency);
 		for (let page = 0; page < cfg.scan.pagesPerGame; page++) {
 			if (!budget.canRequest()) {
 				stoppedByBudget = true;
@@ -113,6 +115,37 @@ export async function scanGameList(
 			totalCount = data.totalCount;
 
 			if (data.items.length === 0) break;
+
+			// --- currency guard -------------------------------------------------
+			// Anonymous requests from datacenter IPs get geo-fitted to USD even
+			// with currency=5 in the query; storing those integer cents as
+			// kopecks poisons history and makes spread math meaningless. Abort
+			// the scan with an explicit status instead.
+			let wrongCurrency: string | null = null;
+			for (const it of data.items) {
+				const detected = detectCurrency(it.priceText);
+				if (isWrongCurrency(detected, expectedIso)) {
+					wrongCurrency = detected;
+					break;
+				}
+			}
+			if (wrongCurrency) {
+				await db
+					.prepare('UPDATE games SET last_scan_status = ?, next_scan_at = ? WHERE appid = ?')
+					.bind('currency_mismatch', ts + 60 * 60 * 1000, game.appid)
+					.run();
+				result.status = 'currency_mismatch';
+				result.error = `Steam answered in ${wrongCurrency} but ${expectedIso ?? `currency code ${cfg.steam.currency}`} is expected — set the STEAM_WEB_COOKIE secret (Steam account with ${expectedIso ?? 'the configured'} currency)`;
+				result.pagesFetched = pagesFetched;
+				result.itemsSeen = itemsSeen;
+				result.itemsInserted = itemsInserted;
+				result.itemsUpdated = itemsUpdated;
+				result.snapshotsInserted = snapshotsInserted;
+				result.snapshotsSkipped = snapshotsSkipped;
+				result.totalCount = totalCount;
+				return result;
+			}
+
 			itemsSeen += data.items.length;
 
 			const idMap = await syncItems(db, game.appid, data.items, ts, (ins, upd) => {

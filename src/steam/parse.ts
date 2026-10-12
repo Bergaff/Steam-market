@@ -115,6 +115,74 @@ export function parseCount(text: string | null | undefined): number | null {
 }
 
 // ---------------------------------------------------------------------------
+// Currency detection — guard against wrong-currency responses
+// ---------------------------------------------------------------------------
+
+/**
+ * Steam currency code → ISO-ish label (the subset we care about).
+ * 5 = RUB per TZ; null for unknown codes (guard disabled then).
+ */
+export function steamCurrencyToIso(code: number): string | null {
+	switch (code) {
+		case 1: return 'USD';
+		case 2: return 'GBP';
+		case 3: return 'EUR';
+		case 5: return 'RUB';
+		case 6: return 'PLN';
+		case 7: return 'BRL';
+		case 16: return 'KRW';
+		case 17: return 'TRY';
+		case 18: return 'UAH';
+		case 20: return 'CAD';
+		case 21: return 'AUD';
+		case 23: return 'CNY';
+		case 33: return 'SEK';
+		case 36: return 'BYN';
+		case 37: return 'KZT';
+		default: return null;
+	}
+}
+
+/**
+ * Order matters: composite symbols (US$, CDN$, R$) must be tested before
+ * the bare `$`.
+ */
+const CURRENCY_PATTERNS: [RegExp, string][] = [
+	[/руб|₽/i, 'RUB'],
+	[/грн|₴/i, 'UAH'],
+	[/\bBYN\b|Br/, 'BYN'],
+	[/тенге|₸|\bKZT\b/i, 'KZT'],
+	[/zł|\bPLN\b/i, 'PLN'],
+	[/R\$/, 'BRL'],
+	[/US\$/, 'USD'],
+	[/CDN\$|\bCAD\b/i, 'CAD'],
+	[/NZ\$/, 'NZD'],
+	[/HK\$/, 'HKD'],
+	[/S\$/, 'SGD'],
+	[/A\$/, 'AUD'],
+	[/€|\bEUR\b/i, 'EUR'],
+	[/£|\bGBP\b/i, 'GBP'],
+	[/\$/, 'USD'],
+];
+
+/**
+ * Detect the currency of a localized price text: "1 234,56 руб." → 'RUB',
+ * "$12.34" → 'USD'. Returns null when nothing recognizable.
+ */
+export function detectCurrency(text: string | null | undefined): string | null {
+	if (!text) return null;
+	for (const [re, iso] of CURRENCY_PATTERNS) {
+		if (re.test(text)) return iso;
+	}
+	return null;
+}
+
+/** True when a detected currency conflicts with the expected Steam currency. */
+export function isWrongCurrency(detected: string | null, expectedIso: string | null): boolean {
+	return detected !== null && expectedIso !== null && detected !== expectedIso;
+}
+
+// ---------------------------------------------------------------------------
 // search/render
 // ---------------------------------------------------------------------------
 
@@ -151,6 +219,8 @@ export interface ParsedMarketItem {
 	iconUrl: string | null;
 	sellListings: number;
 	sellPriceCents: number | null;
+	/** Localized price string from the response — used for currency detection. */
+	priceText: string | null;
 }
 
 /** Normalize a search/render response into flat item rows. */
@@ -172,6 +242,7 @@ export function parseSearchRender(json: unknown): { totalCount: number; items: P
 			iconUrl: typeof iconPath === 'string' && iconPath.length > 0 ? `https://steamcommunity-a.akamaihd.net/economy/image/${iconPath}` : null,
 			sellListings: typeof r.sell_listings === 'number' ? r.sell_listings : parseCount(String(r.sell_listings ?? '')) ?? 0,
 			sellPriceCents: typeof r.sell_price === 'number' ? r.sell_price : parsePriceCents(String(r.sell_price ?? '')),
+			priceText: typeof r.sell_price_text === 'string' && r.sell_price_text.length > 0 ? r.sell_price_text : null,
 		});
 	}
 
@@ -198,6 +269,8 @@ export interface ParsedPriceOverview {
 	medianPriceCents: number | null;
 	volume24h: number | null;
 	sellListings: number | null;
+	/** Currency detected from the localized price strings (null = unknown). */
+	currency: string | null;
 }
 
 export function parsePriceOverview(json: unknown): ParsedPriceOverview | null {
@@ -209,6 +282,7 @@ export function parsePriceOverview(json: unknown): ParsedPriceOverview | null {
 		medianPriceCents: parsePriceCents(data.median_price),
 		volume24h: parseCount(data.volume),
 		sellListings: parseCount(data.sell_listings),
+		currency: detectCurrency(data.lowest_price) ?? detectCurrency(data.median_price),
 	};
 }
 
@@ -271,6 +345,8 @@ export interface ParsedHistogram {
 	sellOrdersCount: number | null;
 	buyRows: OrderRow[];
 	sellRows: OrderRow[];
+	/** Currency detected from price_prefix/price_suffix or the order tables. */
+	currency: string | null;
 }
 
 /**
@@ -298,8 +374,15 @@ export function parseHistogram(json: unknown): ParsedHistogram | null {
 			? parseInt(String(lowestSellRaw), 10) || null
 			: null;
 
-	const buyRows = parseOrderTable(typeof data.buy_order_table === 'string' ? data.buy_order_table : '');
-	const sellRows = parseOrderTable(typeof data.sell_order_table === 'string' ? data.sell_order_table : '');
+	const buyTableHtml = typeof data.buy_order_table === 'string' ? data.buy_order_table : '';
+	const sellTableHtml = typeof data.sell_order_table === 'string' ? data.sell_order_table : '';
+	const buyRows = parseOrderTable(buyTableHtml);
+	const sellRows = parseOrderTable(sellTableHtml);
+
+	// Currency: itemordershistogram exposes price_prefix/price_suffix around
+	// the numbers ("$", " руб."); fall back to the localized table HTML.
+	const affixes = `${typeof data.price_prefix === 'string' ? data.price_prefix : ''} ${typeof data.price_suffix === 'string' ? data.price_suffix : ''}`;
+	const currency = detectCurrency(affixes) ?? detectCurrency(buyTableHtml.slice(0, 2000)) ?? detectCurrency(sellTableHtml.slice(0, 2000));
 
 	// Total buy orders = sum of counts across levels; fall back to the top row.
 	const sumCounts = (rows: OrderRow[]): number | null => {
@@ -322,6 +405,7 @@ export function parseHistogram(json: unknown): ParsedHistogram | null {
 		sellOrdersCount: sumCounts(sellRows),
 		buyRows,
 		sellRows,
+		currency,
 	};
 }
 

@@ -120,6 +120,7 @@ describe('parseSearchRender', () => {
 			iconUrl: 'https://steamcommunity-a.akamaihd.net/economy/image/abc/def123',
 			sellListings: 42,
 			sellPriceCents: 12345,
+			priceText: '123,45 ₽',
 		});
 		expect(parsed!.items[1]!.iconUrl).toBeNull();
 		expect(parsed!.items[1]!.sellPriceCents).toBe(0);
@@ -146,6 +147,7 @@ describe('parsePriceOverview', () => {
 			medianPriceCents: 13000,
 			volume24h: 1234,
 			sellListings: 42,
+			currency: 'RUB',
 		});
 	});
 
@@ -155,6 +157,7 @@ describe('parsePriceOverview', () => {
 			medianPriceCents: null,
 			volume24h: null,
 			sellListings: null,
+			currency: 'RUB',
 		});
 		expect(parsePriceOverview({ success: false })).toBeNull();
 	});
