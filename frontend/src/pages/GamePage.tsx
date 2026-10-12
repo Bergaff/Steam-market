@@ -119,8 +119,14 @@ export default function GamePage() {
 					<h2 className="font-bold">Активность рынка</h2>
 					<PeriodSwitch value={period} onChange={setPeriod} />
 				</div>
-				{activity.loading && !activity.data ? <Spinner /> : <ActivityChart series={activity.data?.series ?? []} longPeriod={period === '30d'} />}
-				<p className="text-[11px] text-muted mt-2">Суммарный объём продаж предметов игры по снимкам (24ч-объём, максимум в бакете).</p>
+				{activity.loading && !activity.data ? (
+					<Spinner />
+				) : activity.error ? (
+					<ErrorNote message={`Не удалось загрузить активность: ${activity.error}`} onRetry={activity.refresh} />
+				) : (
+					<ActivityChart series={activity.data?.series ?? []} longPeriod={period === '30d'} />
+				)}
+				<p className="text-[11px] text-muted mt-2">Продажи за 24 ч загружаются из детальных сканов; sell-лоты видны уже по сканам списков.</p>
 			</section>
 
 			{/* Items table */}
