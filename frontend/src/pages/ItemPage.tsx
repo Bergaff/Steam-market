@@ -13,6 +13,8 @@ export default function ItemPage() {
 	const [period, setPeriod] = useState('24h');
 
 	const details = useFetch(() => api.item(itemId));
+	const currencyStats = useFetch(() => api.stats(), 60_000);
+	const currency = currencyStats.data?.currency ?? 'RUB';
 	const history = useFetch(() => api.itemHistory(itemId, period));
 	const snapshots = useFetch(() => api.itemSnapshots(itemId, 20));
 
@@ -49,24 +51,24 @@ export default function ItemPage() {
 
 					{/* Current prices */}
 					<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-						<PriceCard label="Sell min" value={formatMoney(item.sell_min_price_cents)} />
-						<PriceCard label="Buy max" value={formatMoney(item.buy_max_price_cents)} />
+						<PriceCard label="Sell min" value={formatMoney(item.sell_min_price_cents, currency)} />
+						<PriceCard label="Buy max" value={formatMoney(item.buy_max_price_cents, currency)} />
 						<PriceCard
 							label="Спред"
 							value={item.spread ? formatPctValue(item.spread.net_profit_pct) : '—'}
 							valueClass={item.spread && item.spread.net_profit_pct >= 10 ? 'text-profit' : item.spread && item.spread.net_profit_pct < 0 ? 'text-loss' : ''}
-							sub={item.spread ? `чистыми ${formatMoney(item.spread.net_profit_cents)}` : undefined}
+							sub={item.spread ? `чистыми ${formatMoney(item.spread.net_profit_cents, currency)}` : undefined}
 						/>
 						<PriceCard label="Объём 24ч" value={formatNumber(item.volume_24h)} />
 						<PriceCard label="Лотов" value={formatNumber(item.sell_listings)} sub={item.buy_orders_count !== null ? `buy-ордеров: ${formatNumber(item.buy_orders_count)}` : undefined} />
-						<PriceCard label="Медиана" value={formatMoney(item.median_price_cents)} />
+						<PriceCard label="Медиана" value={formatMoney(item.median_price_cents, currency)} />
 					</div>
 
 					{opp && opp.is_active && (
 						<div className="rounded-card border border-profit/30 bg-profit/5 px-4 py-3 text-sm flex flex-wrap items-center gap-x-4 gap-y-1">
 							<span className="font-semibold text-profit">🔥 Активный сигнал</span>
 							<span className="text-muted">
-								профит {formatMoney(opp.net_profit_cents)} ({formatPctValue(opp.net_profit_pct)}) после комиссии Steam · обнаружен {formatDateTime(opp.detected_at)}
+								профит {formatMoney(opp.net_profit_cents, currency)} ({formatPctValue(opp.net_profit_pct)}) после комиссии Steam · обнаружен {formatDateTime(opp.detected_at)}
 							</span>
 						</div>
 					)}
@@ -77,7 +79,7 @@ export default function ItemPage() {
 							<h2 className="font-bold">История цен</h2>
 							<PeriodSwitch value={period} onChange={setPeriod} />
 						</div>
-						{history.loading && !history.data ? <Spinner /> : <PriceChart series={history.data?.series ?? []} longPeriod={period !== '24h'} />}
+						{history.loading && !history.data ? <Spinner /> : <PriceChart series={history.data?.series ?? []} currency={currency} longPeriod={period !== '24h'} />}
 					</section>
 
 					{/* Last snapshots */}
@@ -106,9 +108,9 @@ export default function ItemPage() {
 										{(snapshots.data?.snapshots ?? []).map((s) => (
 											<tr key={s.id} className="border-b border-line/60 last:border-0 hover:bg-surface2/60">
 												<td className="px-3 py-1.5 tnum text-muted">{formatDateTime(s.snapshot_at)}</td>
-												<td className="px-3 py-1.5 text-right tnum">{formatMoney(s.sell_min_price_cents)}</td>
-												<td className="px-3 py-1.5 text-right tnum">{formatMoney(s.buy_max_price_cents)}</td>
-												<td className="px-3 py-1.5 text-right tnum text-muted">{formatMoney(s.median_price_cents)}</td>
+												<td className="px-3 py-1.5 text-right tnum">{formatMoney(s.sell_min_price_cents, currency)}</td>
+												<td className="px-3 py-1.5 text-right tnum">{formatMoney(s.buy_max_price_cents, currency)}</td>
+												<td className="px-3 py-1.5 text-right tnum text-muted">{formatMoney(s.median_price_cents, currency)}</td>
 												<td className="px-3 py-1.5 text-right tnum">{formatNumber(s.volume_24h)}</td>
 												<td className="px-3 py-1.5 text-right tnum text-muted">{formatNumber(s.sell_listings)}</td>
 												<td className="px-3 py-1.5 text-right tnum text-muted">{formatNumber(s.buy_orders_count)}</td>

@@ -38,6 +38,8 @@ export default function GamePage() {
 
 	const details = useFetch<GameDetailsResponse>(() => api.game(appid));
 	const activity = useFetch(() => api.gameActivity(appid, period), undefined);
+	const stats = useFetch(() => api.stats(), 60_000);
+	const currency = stats.data?.currency ?? 'RUB';
 
 	const query = useMemo<ItemsQuery>(
 		() => ({
@@ -126,7 +128,7 @@ export default function GamePage() {
 				<div className="flex flex-wrap items-center gap-3 mb-3">
 					<h2 className="font-bold">Предметы</h2>
 					<div className="flex flex-wrap items-center gap-2 ml-auto">
-						<FilterInput placeholder="мин. цена, ₽" value={minPrice} onChange={(v) => { setMinPrice(v); setPage(0); }} />
+						<FilterInput placeholder={`мин. цена (${currency})`} value={minPrice} onChange={(v) => { setMinPrice(v); setPage(0); }} />
 						<FilterInput placeholder="мин. объём 24ч" value={minVolume} onChange={(v) => { setMinVolume(v); setPage(0); }} />
 						<FilterInput placeholder="спред ≥ %" value={minSpread} onChange={(v) => { setMinSpread(v); setPage(0); }} />
 					</div>
@@ -166,8 +168,8 @@ export default function GamePage() {
 												</Link>
 												<div className="text-[10px] text-muted tnum">{it.snapshot_at ? timeAgo(it.snapshot_at) : 'нет данных'}</div>
 											</td>
-											<td className="px-3 py-2 text-right tnum">{formatMoney(it.sell_min_price_cents)}</td>
-											<td className="px-3 py-2 text-right tnum text-muted">{formatMoney(it.buy_max_price_cents)}</td>
+											<td className="px-3 py-2 text-right tnum">{formatMoney(it.sell_min_price_cents, currency)}</td>
+											<td className="px-3 py-2 text-right tnum text-muted">{formatMoney(it.buy_max_price_cents, currency)}</td>
 											<td className="px-3 py-2 text-right">
 												<ProfitBadge pct={it.spread?.net_profit_pct ?? null} />
 											</td>
@@ -189,8 +191,8 @@ export default function GamePage() {
 			{/* Top-10 quick lists */}
 			{details.data && (details.data.top_by_volume.length > 0 || details.data.top_by_spread.length > 0) && (
 				<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-					<TopList title="Топ по объёму продаж" items={details.data.top_by_volume} />
-					<TopList title="Топ по спреду" items={details.data.top_by_spread} />
+					<TopList title="Топ по объёму продаж" items={details.data.top_by_volume} currency={currency} />
+					<TopList title="Топ по спреду" items={details.data.top_by_spread} currency={currency} />
 				</div>
 			)}
 		</div>
@@ -245,7 +247,7 @@ function Th({
 	);
 }
 
-function TopList({ title, items }: { title: string; items: GameDetailsResponse['top_by_volume'] }) {
+function TopList({ title, items, currency }: { title: string; items: GameDetailsResponse['top_by_volume']; currency: string }) {
 	if (items.length === 0) return null;
 	return (
 		<div className="rounded-card border border-line bg-surface p-4">
@@ -258,7 +260,7 @@ function TopList({ title, items }: { title: string; items: GameDetailsResponse['
 						<Link to={`/items/${it.item_id}`} className="flex-1 truncate hover:text-accent" title={it.name}>
 							{it.name}
 						</Link>
-						<span className="tnum text-muted text-xs">{formatMoney(it.sell_min_price_cents)}</span>
+						<span className="tnum text-muted text-xs">{formatMoney(it.sell_min_price_cents, currency)}</span>
 						{it.spread && <ProfitBadge pct={it.spread.net_profit_pct} />}
 						<span className="tnum text-xs w-14 text-right">{formatNumber(it.volume_24h)}</span>
 					</div>

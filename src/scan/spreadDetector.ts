@@ -9,7 +9,7 @@
  * Signal conditions (configurable):
  *   net_profit_pct >= MIN_SPREAD_PCT (10)
  *   volume_24h     >= MIN_VOLUME_24H (5)
- *   buy_max_price  >= MIN_BUY_PRICE_CENTS (500 = 5 RUB)
+ *   buy_max_price  >= MIN_BUY_PRICE_CENTS (500 = 5.00 units of configured currency)
  *
  * Freshness (works with delta-compressed snapshots):
  *   - the item's game was successfully scanned within SNAPSHOT_MAX_AGE_MS;

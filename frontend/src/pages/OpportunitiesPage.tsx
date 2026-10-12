@@ -9,7 +9,7 @@ type SortKey = 'profit' | 'profit_abs' | 'volume' | 'updated' | 'price';
 
 const SORTS: { key: SortKey; label: string }[] = [
 	{ key: 'profit', label: 'Профит %' },
-	{ key: 'profit_abs', label: 'Профит ₽' },
+	{ key: 'profit_abs', label: 'Профит' },
 	{ key: 'volume', label: 'Объём 24ч' },
 	{ key: 'price', label: 'Цена sell' },
 	{ key: 'updated', label: 'Обновление' },
@@ -43,6 +43,7 @@ export default function OpportunitiesPage() {
 	);
 
 	const opps = useFetch(() => api.opportunities(query), 60_000);
+	const currency = opps.data?.currency ?? 'RUB';
 
 	return (
 		<div className="space-y-4">
@@ -100,7 +101,7 @@ export default function OpportunitiesPage() {
 					>
 						{SORTS.map((s) => (
 							<option key={s.key} value={s.key}>
-								{s.label}
+								{s.key === 'profit_abs' ? `Профит (${currency})` : s.label}
 							</option>
 						))}
 					</select>
@@ -120,7 +121,7 @@ export default function OpportunitiesPage() {
 				<ErrorNote message={opps.error} onRetry={opps.refresh} />
 			) : (
 				<>
-					<OpportunityTable rows={opps.data?.opportunities ?? []} currency={opps.data?.currency ?? 'RUB'} />
+					<OpportunityTable rows={opps.data?.opportunities ?? []} currency={currency} />
 					<Pagination total={opps.data?.total ?? 0} limit={LIMIT} offset={page * LIMIT} onChange={(off) => setPage(off / LIMIT)} />
 				</>
 			)}

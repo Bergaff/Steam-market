@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useFetch } from '../hooks';
 import { StatCard, Spinner, ErrorNote } from '../components/Bits';
 import OpportunityTable from '../components/OpportunityTable';
-import { formatNumber, timeAgo } from '../format';
+import { formatMoney, formatNumber, timeAgo } from '../format';
 
 /**
  * Главная (TZ §8): блок «Сейчас на рынке» (3 карточки) + «🔥 Топ возможностей»
@@ -81,7 +81,7 @@ export default function HomePage() {
 						Сервис читает <b className="text-ink">публичные</b> данные торговой площадки Steam: цены лотов, buy-ордера, объёмы продаж.
 					</li>
 					<li>
-						Сигнал = предмет, где <code className="text-accent font-mono text-xs">sell × 0.85 − buy ≥ 10%</code> при объёме ≥ 5 продаж/сутки и цене buy ≥ 5 ₽.
+						Сигнал = предмет, где <code className="text-accent font-mono text-xs">sell × 0.85 − buy ≥ 10%</code> при объёме ≥ 5 продаж/сутки и цене buy ≥ {formatMoney(500, currency)}.
 					</li>
 					<li>
 						🔒 Мы <b className="text-ink">никогда</b> не запрашиваем логин/пароль Steam, API-ключ или trade-ссылку. Авторизация не нужна.

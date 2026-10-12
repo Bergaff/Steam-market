@@ -45,9 +45,9 @@
 	// Не-секретная конфигурация (все значения — строки). Секреты: ADMIN_API_KEY через
 	// `wrangler secret put` (в проде) или .dev.vars (локально).
 	"vars": {
-		"STEAM_CURRENCY": "5",
+		"STEAM_CURRENCY": "1",
 		"STEAM_LANGUAGE": "russian",
-		"STEAM_COUNTRY": "RU",
+		"STEAM_COUNTRY": "BY",
 		"SCAN_USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 		// АНОНИМНЫЙ профиль (по умолчанию): Steam жёстко лимитирует датацентровые
 		// IP — после bursts включает блок на часы. Поэтому медленно: 6с между

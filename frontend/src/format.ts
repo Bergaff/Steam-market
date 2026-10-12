@@ -14,7 +14,7 @@ export function formatMoney(cents: number | null | undefined, currency = 'RUB'):
 	}
 }
 
-/** Compact money for chart axes: 1 234 ₽, 12 345 ₽. */
+/** Compact money for chart axes, using the configured currency code. */
 export function formatMoneyShort(cents: number | null | undefined, currency = 'RUB'): string {
 	if (cents === null || cents === undefined) return '—';
 	const symbol = currency === 'RUB' ? '₽' : currency;

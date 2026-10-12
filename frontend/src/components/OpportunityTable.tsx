@@ -5,7 +5,7 @@ import { ItemIcon, ProfitBadge, SteamButton, EmptyNote } from './Bits';
 
 /**
  * «🔥 Топ возможностей» — main dashboard table (TZ §8).
- * Columns: icon | game | item | buy | sell | profit ₽ | profit % | volume 24h | Steam link.
+ * Columns: icon | game | item | buy | sell | profit (configured currency) | profit % | volume 24h | Steam link.
  */
 export default function OpportunityTable({
 	rows,
