@@ -135,7 +135,11 @@ export async function scanGameList(
 					.bind('currency_mismatch', ts + 60 * 60 * 1000, game.appid)
 					.run();
 				result.status = 'currency_mismatch';
-				result.error = `Steam answered in ${wrongCurrency} but ${expectedIso ?? `currency code ${cfg.steam.currency}`} is expected — set the STEAM_WEB_COOKIE secret (Steam account with ${expectedIso ?? 'the configured'} currency)`;
+				const expectedLabel = expectedIso ?? `unknown currency (code ${cfg.steam.currency})`;
+				const remedy = cfg.steam.webCookie
+					? 'Check the Steam account/store currency and configure STEAM_CURRENCY to match.'
+					: 'Set STEAM_WEB_COOKIE for the desired account, or configure STEAM_CURRENCY to match the response.';
+				result.error = `Currency mismatch: Steam returned ${wrongCurrency}; configured ${expectedLabel} (STEAM_CURRENCY=${cfg.steam.currency}). No prices were written. ${remedy}`;
 				result.pagesFetched = pagesFetched;
 				result.itemsSeen = itemsSeen;
 				result.itemsInserted = itemsInserted;

@@ -180,8 +180,16 @@ function summarizeForState(s: TickSummary): object {
 		ranAt: s.ranAt,
 		mode: s.mode,
 		skipped: s.skipped,
-		games: s.gamesScanned.map((g) => ({ appid: g.appid, status: g.status, seen: g.itemsSeen, snaps: g.snapshotsInserted })),
-		details: s.details ? { ok: s.details.succeeded, failed: s.details.failed, wrote: s.details.written, flat: s.details.skippedUnchanged } : undefined,
+		games: s.gamesScanned.map((g) => ({ appid: g.appid, status: g.status, seen: g.itemsSeen, snaps: g.snapshotsInserted, error: g.error })),
+		details: s.details
+			? {
+					ok: s.details.succeeded,
+					failed: s.details.failed,
+					wrote: s.details.written,
+					flat: s.details.skippedUnchanged,
+					currencyMismatches: s.details.currencyMismatches,
+				}
+			: undefined,
 		spread: s.spread ? { active: s.spread.qualifying, off: s.spread.deactivated } : undefined,
 		reqs: s.steamRequests,
 		errs: s.steamErrors,
