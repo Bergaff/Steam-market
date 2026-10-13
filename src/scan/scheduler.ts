@@ -189,9 +189,13 @@ function summarizeForState(s: TickSummary): object {
 					wrote: s.details.written,
 					flat: s.details.skippedUnchanged,
 					currencyMismatches: s.details.currencyMismatches,
+					byAppid: s.details.byAppid,
 					nameidMissing: s.details.nameidMissing,
 					volumeRetrieved: s.details.volumeRetrieved,
 					volumeMissing: s.details.volumeMissing,
+					priceOverviewMissing: s.details.priceOverviewMissing,
+					volumeFieldMissing: s.details.volumeFieldMissing,
+					volumeUnparseable: s.details.volumeUnparseable,
 					stoppedByBudget: s.details.stoppedByBudget,
 				}
 			: undefined,

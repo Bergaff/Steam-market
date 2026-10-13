@@ -31,12 +31,23 @@ const MAX_ATTEMPTS = 4;
 /** Touch `detail_at` at most this often when values did not move. */
 const DETAIL_TOUCH_MIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
+export interface DetailAppSummary {
+	processed: number;
+	succeeded: number;
+	failed: number;
+	nameidMissing: number;
+	volumeRetrieved: number;
+	volumeMissing: number;
+}
+
 export interface DetailScanResult {
 	processed: number;
 	succeeded: number;
 	failed: number;
 	written: number;
 	skippedUnchanged: number;
+	/** Per-game counters identify which games the global queue actually processed. */
+	byAppid: Record<string, DetailAppSummary>;
 	/** Items whose Steam response arrived in a currency other than configured. */
 	currencyMismatches: number;
 	/** Items whose listing page did not expose an item_nameid for the order book. */
@@ -45,6 +56,9 @@ export interface DetailScanResult {
 	volumeRetrieved: number;
 	/** Detail attempts completed without a parseable priceoverview volume. */
 	volumeMissing: number;
+	priceOverviewMissing: number;
+	volumeFieldMissing: number;
+	volumeUnparseable: number;
 	stoppedByBudget: boolean;
 	error?: string;
 }
@@ -70,10 +84,14 @@ export async function processDetailQueue(
 		failed: 0,
 		written: 0,
 		skippedUnchanged: 0,
+		byAppid: {},
 		currencyMismatches: 0,
 		nameidMissing: 0,
 		volumeRetrieved: 0,
 		volumeMissing: 0,
+		priceOverviewMissing: 0,
+		volumeFieldMissing: 0,
+		volumeUnparseable: 0,
 		stoppedByBudget: false,
 	};
 
@@ -84,8 +102,9 @@ export async function processDetailQueue(
 			`SELECT q.item_id, q.appid, i.hash_name, i.item_nameid, q.attempts
 			 FROM scan_queue q
 			 JOIN items i ON i.id = q.item_id
+			 JOIN games g ON g.appid = q.appid
 			 WHERE q.due_at <= ?
-			 ORDER BY q.due_at ASC, q.priority ASC, q.appid ASC, q.item_id ASC
+			 ORDER BY g.tier ASC, q.due_at ASC, q.priority ASC, q.appid ASC, q.item_id ASC
 			 LIMIT ?`
 		)
 		.bind(nowMs(), limit)
@@ -99,6 +118,14 @@ export async function processDetailQueue(
 			result.stoppedByBudget = true;
 			break;
 		}
+		const appStats = (result.byAppid[String(row.appid)] ??= {
+			processed: 0,
+			succeeded: 0,
+			failed: 0,
+			nameidMissing: 0,
+			volumeRetrieved: 0,
+			volumeMissing: 0,
+		});
 
 		try {
 			let nameid = row.item_nameid;
@@ -134,6 +161,7 @@ export async function processDetailQueue(
 				} else {
 					nameidMissing = true;
 					result.nameidMissing++;
+					appStats.nameidMissing++;
 				}
 			}
 			if (nameid === null && !nameidMissing) orderbookDeferred = true;
@@ -152,8 +180,16 @@ export async function processDetailQueue(
 			}
 
 			const volume = overview?.volume24h ?? null;
-			if (volume !== null) result.volumeRetrieved++;
-			else result.volumeMissing++;
+			if (volume !== null) {
+				result.volumeRetrieved++;
+				appStats.volumeRetrieved++;
+			} else {
+				result.volumeMissing++;
+				appStats.volumeMissing++;
+				if (!overview) result.priceOverviewMissing++;
+				else if (overview.volumeStatus === 'missing_field') result.volumeFieldMissing++;
+				else result.volumeUnparseable++;
+			}
 
 			if (!hist && !overview) {
 				if (rateLimitError) throw rateLimitError;
@@ -168,6 +204,7 @@ export async function processDetailQueue(
 			if (isWrongCurrency(detectedCur, expectedIso)) {
 				result.processed++;
 				result.currencyMismatches++;
+				appStats.processed++;
 				await db
 					.prepare('UPDATE scan_queue SET due_at = ?, last_error = ? WHERE item_id = ?')
 					.bind(nowMs() + LONG_RETRY_DELAY_MS, `currency mismatch: got ${detectedCur}, expected ${expectedIso}`, row.item_id)
@@ -273,6 +310,8 @@ export async function processDetailQueue(
 			}
 			result.processed++;
 			result.succeeded++;
+			appStats.processed++;
+			appStats.succeeded++;
 			if (rateLimitError) throw rateLimitError; // Persist priceoverview before the global pause.
 		} catch (err) {
 			if (err instanceof Error && err.name === 'RateLimitedError') {
@@ -280,6 +319,8 @@ export async function processDetailQueue(
 			}
 			result.processed++;
 			result.failed++;
+			appStats.processed++;
+			appStats.failed++;
 			const message = err instanceof Error ? err.message : String(err);
 			const nextAttempt = row.attempts + 1;
 			const retryDelay = nextAttempt >= MAX_ATTEMPTS ? LONG_RETRY_DELAY_MS : RETRY_DELAY_MS;

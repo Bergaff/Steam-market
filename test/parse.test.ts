@@ -146,6 +146,7 @@ describe('parsePriceOverview', () => {
 			lowestPriceCents: 12345,
 			medianPriceCents: 13000,
 			volume24h: 1234,
+			volumeStatus: 'parsed',
 			sellListings: 42,
 			currency: 'RUB',
 		});
@@ -156,9 +157,12 @@ describe('parsePriceOverview', () => {
 			lowestPriceCents: 500,
 			medianPriceCents: null,
 			volume24h: null,
+			volumeStatus: 'missing_field',
 			sellListings: null,
 			currency: 'RUB',
 		});
+		expect(parsePriceOverview({ success: true, volume: '--' })?.volumeStatus).toBe('unparseable');
+		expect(parsePriceOverview({ success: true, volume: 0 })).toMatchObject({ volume24h: 0, volumeStatus: 'parsed' });
 		expect(parsePriceOverview({ success: false })).toBeNull();
 	});
 });

@@ -268,6 +268,7 @@ export interface ParsedPriceOverview {
 	lowestPriceCents: number | null;
 	medianPriceCents: number | null;
 	volume24h: number | null;
+	volumeStatus: 'parsed' | 'missing_field' | 'unparseable';
 	sellListings: number | null;
 	/** Currency detected from the localized price strings (null = unknown). */
 	currency: string | null;
@@ -277,10 +278,14 @@ export function parsePriceOverview(json: unknown): ParsedPriceOverview | null {
 	if (typeof json !== 'object' || json === null) return null;
 	const data = json as PriceOverviewRaw;
 	if (data.success === false) return null;
+	const volume24h = parseCount(data.volume === undefined || data.volume === null ? null : String(data.volume));
+	const volumeStatus =
+		data.volume === undefined || data.volume === null ? 'missing_field' : volume24h === null ? 'unparseable' : 'parsed';
 	return {
 		lowestPriceCents: parsePriceCents(data.lowest_price),
 		medianPriceCents: parsePriceCents(data.median_price),
-		volume24h: parseCount(data.volume),
+		volume24h,
+		volumeStatus,
 		sellListings: parseCount(data.sell_listings),
 		currency: detectCurrency(data.lowest_price) ?? detectCurrency(data.median_price),
 	};

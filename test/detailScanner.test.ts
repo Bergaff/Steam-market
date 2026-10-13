@@ -67,6 +67,7 @@ describe('processDetailQueue', () => {
 				lowestPriceCents: 125,
 				medianPriceCents: 120,
 				volume24h: 23,
+				volumeStatus: 'parsed',
 				sellListings: 8,
 				currency: 'USD',
 			};
@@ -90,6 +91,7 @@ describe('processDetailQueue', () => {
 		expect(result.nameidMissing).toBe(1);
 		expect(result.succeeded).toBe(1);
 		expect(result.failed).toBe(0);
+		expect(result.byAppid['440']).toMatchObject({ volumeRetrieved: 1, nameidMissing: 1 });
 		expect(batchedSql.some((sql) => sql.includes('INSERT INTO price_snapshots'))).toBe(true);
 		const retry = executions.find(({ sql }) => sql.includes('UPDATE scan_queue SET attempts'));
 		expect(retry?.bindings.at(-2)).toContain('item_nameid not found');
