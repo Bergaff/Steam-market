@@ -17,9 +17,10 @@ export default function ActivityChart({ series, longPeriod }: { series: Activity
 	}
 
 	return (
-		<div className="h-48 sm:h-56">
-			<ResponsiveContainer width="100%" height="100%">
-				<BarChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+		<div className="w-full">
+			<div className="h-40 sm:h-48">
+				<ResponsiveContainer width="100%" height="100%">
+					<BarChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
 					<CartesianGrid stroke="#232a3a" strokeDasharray="3 3" vertical={false} />
 					<XAxis
 						dataKey="t"
@@ -48,20 +49,24 @@ export default function ActivityChart({ series, longPeriod }: { series: Activity
 						labelFormatter={(t) => formatDateTime(Number(t))}
 						formatter={(value, name) => {
 							const v = value === null || value === undefined ? null : typeof value === 'number' ? value : Number(value);
-							const label = String(name) === 'volume_24h_sum' ? 'Объём за 24 ч (предметы с данными)' : 'Sell-лоты';
+							const label = String(name) === 'volume_24h_sum' ? 'Объём за 24 ч' : 'Sell-лоты';
 							return [v === null ? 'нет данных' : formatNumber(Math.round(v)), label];
 						}}
 					/>
 					<Bar dataKey="volume_24h_sum" fill="#4f8cff" radius={[3, 3, 0, 0]} isAnimationActive={false} />
 					<Bar dataKey="listings_avg" fill="#3ddc84" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-				</BarChart>
-			</ResponsiveContainer>
-			<div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[11px] text-muted mt-1">
-				<span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-accent" /> Объём за 24 ч (собранные предметы)</span>
-				<span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-profit" /> Активные sell-лоты</span>
+					</BarChart>
+				</ResponsiveContainer>
 			</div>
+			<div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] leading-5 text-muted mt-2">
+				<span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 shrink-0 rounded-sm bg-accent" /> Объём за 24 ч</span>
+				<span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 shrink-0 rounded-sm bg-profit" /> Активные sell-лоты</span>
+			</div>
+			<p className="text-center text-[11px] leading-relaxed text-muted mt-1 px-1">
+				Объём — только по предметам с собранной детализацией, не весь рынок игры.
+			</p>
 			{hasMissingVolume && (
-				<p className="text-center text-[11px] text-warn mt-1">
+				<p className="text-center text-[11px] leading-relaxed text-warn mt-1 px-1">
 					{hasVolumeData
 						? 'Объём частичный: предметы без собранных данных не включены в сумму.'
 						: 'Детальный объём продаж ещё не собран; отсутствие данных не означает нулевые продажи.'}

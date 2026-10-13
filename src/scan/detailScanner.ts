@@ -2,9 +2,9 @@
  * Worker 2 — detail scanner (TZ §6, воркер 2): buy orders for top-N items.
  *
  * Per queued item:
- *   1. If `item_nameid` is unknown — parse it once from the listing page HTML;
- *   2. GET itemordershistogram → highest buy order + order counts;
- *   3. GET priceoverview → volume_24h + median_price;
+ *   1. GET priceoverview first → volume_24h + median_price (independent of item_nameid);
+ *   2. If `item_nameid` is unknown — parse it once from the listing page HTML;
+ *   3. GET itemordershistogram → highest buy order + order counts when available;
  *   4. Write ONLY when the order book actually moved (delta compression) or
  *      the heartbeat passed: merge into the latest snapshot / insert a new one
  *      + refresh `item_latest_state`. Otherwise just touch `detail_at` (so the
@@ -39,6 +39,8 @@ export interface DetailScanResult {
 	skippedUnchanged: number;
 	/** Items whose Steam response arrived in a currency other than configured. */
 	currencyMismatches: number;
+	/** Items whose listing page did not expose an item_nameid for the order book. */
+	nameidMissing: number;
 	/** Items for which priceoverview supplied a parseable 24h volume. */
 	volumeRetrieved: number;
 	/** Detail attempts completed without a parseable priceoverview volume. */
@@ -69,6 +71,7 @@ export async function processDetailQueue(
 		written: 0,
 		skippedUnchanged: 0,
 		currencyMismatches: 0,
+		nameidMissing: 0,
 		volumeRetrieved: 0,
 		volumeMissing: 0,
 		stoppedByBudget: false,
@@ -89,9 +92,8 @@ export async function processDetailQueue(
 		.all<QueueRow>();
 
 	for (const row of due.results) {
-		// Reserve every request needed to finish the item, including priceoverview
-		// (the source of volume); never spend the last slot on nameid/histogram
-		// and then silently finish without fetching volume.
+		// Reserve up to three requests: priceoverview first, then the optional
+		// item page and histogram needed for order-book data.
 		const requiredRequests = row.item_nameid === null ? 3 : 2;
 		if (!budget.canAfford(requiredRequests)) {
 			result.stoppedByBudget = true;
@@ -100,38 +102,62 @@ export async function processDetailQueue(
 
 		try {
 			let nameid = row.item_nameid;
+			let nameidMissing = false;
+			let requestError: unknown = null;
+			let rateLimitError: Error | null = null;
+			let orderbookDeferred = false;
 
-			// --- 1. item_nameid (one-time, cached on the item) -----------------
-			if (nameid === null) {
-				nameid = await fetchItemNameid(client, row.appid, row.hash_name, row.item_id);
+			// Fetch volume first: priceoverview needs only appid + hash name and
+			// must not be blocked by a missing/undiscoverable item_nameid.
+			let overview = null;
+			try {
+				overview = await fetchPriceOverview(client, cfg, row.appid, row.hash_name, row.item_id);
+			} catch (err) {
+				requestError = err;
+				if (err instanceof Error && err.name === 'RateLimitedError') throw err;
+			} finally {
 				budget.consume();
+			}
+
+			// --- item_nameid (one-time, cached on the item) ----------------------
+			if (nameid === null && budget.canRequest()) {
+				try {
+					nameid = await fetchItemNameid(client, row.appid, row.hash_name, row.item_id);
+				} catch (err) {
+					requestError ??= err;
+					if (err instanceof Error && err.name === 'RateLimitedError') rateLimitError = err;
+				} finally {
+					budget.consume();
+				}
 				if (nameid !== null) {
 					await db.prepare('UPDATE items SET item_nameid = ? WHERE id = ?').bind(nameid, row.item_id).run();
 				} else {
-					// No order book for this item — check again much later.
-					await db
-						.prepare('UPDATE scan_queue SET attempts = attempts + 1, due_at = ?, last_error = ? WHERE item_id = ?')
-						.bind(nowMs() + LONG_RETRY_DELAY_MS, 'item_nameid not found (no order book?)', row.item_id)
-						.run();
-					result.processed++;
-					result.failed++;
-					continue;
+					nameidMissing = true;
+					result.nameidMissing++;
+				}
+			}
+			if (nameid === null && !nameidMissing) orderbookDeferred = true;
+
+			// --- Order book: highest buy order (optional if nameid is absent) ----
+			let hist = null;
+			if (nameid !== null && !rateLimitError && budget.canRequest()) {
+				try {
+					hist = await fetchOrdersHistogram(client, cfg, nameid, row.appid, row.item_id);
+				} catch (err) {
+					requestError ??= err;
+					if (err instanceof Error && err.name === 'RateLimitedError') rateLimitError = err;
+				} finally {
+					budget.consume();
 				}
 			}
 
-			// --- 2. Order book: highest buy order -------------------------------
-			const hist = await fetchOrdersHistogram(client, cfg, nameid, row.appid, row.item_id);
-			budget.consume();
-
-			// --- 3. priceoverview: volume + median ------------------------------
-			let overview = null;
-			if (budget.canRequest()) {
-				overview = await fetchPriceOverview(client, cfg, row.appid, row.hash_name, row.item_id);
-				budget.consume();
-			}
+			const volume = overview?.volume24h ?? null;
+			if (volume !== null) result.volumeRetrieved++;
+			else result.volumeMissing++;
 
 			if (!hist && !overview) {
-				throw new Error('both histogram and priceoverview returned nothing');
+				if (rateLimitError) throw rateLimitError;
+				throw requestError instanceof Error ? requestError : new Error('both histogram and priceoverview returned nothing');
 			}
 
 			// --- currency guard (see listScanner): never mix currencies ----------
@@ -152,9 +178,6 @@ export async function processDetailQueue(
 			const ts = nowMs();
 			const buyCents = hist?.highestBuyCents ?? null;
 			const sellCents = hist?.lowestSellCents ?? overview?.lowestPriceCents ?? null;
-			const volume = overview?.volume24h ?? null;
-			if (volume !== null) result.volumeRetrieved++;
-			else result.volumeMissing++;
 			const median = overview?.medianPriceCents ?? null;
 
 			// --- 4. Delta gate: write only when the order book moved ------------
@@ -229,20 +252,28 @@ export async function processDetailQueue(
 				result.written++;
 			}
 
-			if (volume === null) {
-				// A successful histogram alone is not enough: keep retrying the
-				// priceoverview source of volume instead of marking this item fresh.
+			const retryReasons: string[] = [];
+			if (volume === null) retryReasons.push('priceoverview volume missing');
+			if (nameidMissing) retryReasons.push('item_nameid not found');
+			else if (orderbookDeferred) retryReasons.push('orderbook check deferred by request budget');
+			else if (nameid !== null && !hist) retryReasons.push('orderbook unavailable');
+			if (requestError instanceof Error) retryReasons.push(requestError.message);
+			if (rateLimitError) retryReasons.push(rateLimitError.message);
+
+			if (retryReasons.length > 0) {
 				const nextAttempt = row.attempts + 1;
-				const retryDelay = nextAttempt >= MAX_ATTEMPTS ? LONG_RETRY_DELAY_MS : RETRY_DELAY_MS;
+				const retrySoon = requestError instanceof Error || volume === null || orderbookDeferred || (nameid !== null && !hist);
+				const retryDelay = retrySoon && nextAttempt < MAX_ATTEMPTS ? RETRY_DELAY_MS : LONG_RETRY_DELAY_MS;
 				await db
 					.prepare('UPDATE scan_queue SET attempts = ?, due_at = ?, last_error = ? WHERE item_id = ?')
-					.bind(nextAttempt, nowMs() + retryDelay, 'priceoverview volume missing', row.item_id)
+					.bind(nextAttempt, nowMs() + retryDelay, retryReasons.join('; ').slice(0, 400), row.item_id)
 					.run();
 			} else {
 				await db.prepare('DELETE FROM scan_queue WHERE item_id = ?').bind(row.item_id).run();
 			}
 			result.processed++;
 			result.succeeded++;
+			if (rateLimitError) throw rateLimitError; // Persist priceoverview before the global pause.
 		} catch (err) {
 			if (err instanceof Error && err.name === 'RateLimitedError') {
 				throw err; // global pause is handled by the scheduler

@@ -126,7 +126,6 @@ export default function GamePage() {
 				) : (
 					<ActivityChart series={activity.data?.series ?? []} longPeriod={period === '30d'} />
 				)}
-				<p className="text-[11px] text-muted mt-2">Объём суммируется только по предметам с успешной детализацией (это не весь рынок игры); отсутствие данных теперь не считается нулём. Sell-лоты идут из сканов списков.</p>
 			</section>
 
 			{/* Items table */}

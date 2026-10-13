@@ -189,6 +189,7 @@ function summarizeForState(s: TickSummary): object {
 					wrote: s.details.written,
 					flat: s.details.skippedUnchanged,
 					currencyMismatches: s.details.currencyMismatches,
+					nameidMissing: s.details.nameidMissing,
 					volumeRetrieved: s.details.volumeRetrieved,
 					volumeMissing: s.details.volumeMissing,
 					stoppedByBudget: s.details.stoppedByBudget,
