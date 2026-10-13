@@ -184,8 +184,8 @@ games.get('/:appid/items', async (c) => {
 
 /**
  * GET /api/v1/games/:appid/activity?period=24h|7d|30d
- * Aggregated market activity: per time bucket — total 24h volume and avg listings.
- * (per item we take MAX(volume_24h) inside the bucket to avoid double counting)
+ * Activity aggregated from stored snapshots of tracked items (not the whole game market).
+ * Per bucket, take each item's MAX(volume_24h) to avoid counting its rolling value twice.
  */
 games.get('/:appid/activity', async (c) => {
 	const appid = parseInt(c.req.param('appid'), 10);
@@ -200,17 +200,18 @@ games.get('/:appid/activity', async (c) => {
 
 	interface ActivityRow {
 		bucket: number;
-		volume: number;
+		volume: number | null;
 		listings: number;
 		items: number;
+		volume_items: number;
 	}
 
 	// CAST keeps SQLite integer division (D1 may bind numbers as REAL).
 	const rows = await c.env.DB.prepare(
-		`SELECT bucket, SUM(item_volume) AS volume, SUM(item_listings) AS listings, COUNT(*) AS items
+		`SELECT bucket, SUM(item_volume) AS volume, SUM(item_listings) AS listings, COUNT(*) AS items, COUNT(item_volume) AS volume_items
 		 FROM (
 		   SELECT (CAST(s.snapshot_at AS INTEGER) / CAST(? AS INTEGER)) * CAST(? AS INTEGER) AS bucket, s.item_id,
-		          MAX(COALESCE(s.volume_24h, 0)) AS item_volume,
+		          MAX(s.volume_24h) AS item_volume,
 		          AVG(COALESCE(s.sell_listings, 0)) AS item_listings
 		   FROM price_snapshots s
 		   JOIN items i ON i.id = s.item_id
@@ -230,9 +231,10 @@ games.get('/:appid/activity', async (c) => {
 		series: rows.results.map((r) => ({
 			t: r.bucket,
 			t_iso: toIso(r.bucket),
-			volume_24h_sum: Math.round(r.volume ?? 0),
+			volume_24h_sum: r.volume === null ? null : Math.round(r.volume),
 			listings_avg: Math.round(r.listings ?? 0),
 			items: r.items ?? 0,
+			volume_items: r.volume_items ?? 0,
 		})),
 	});
 });

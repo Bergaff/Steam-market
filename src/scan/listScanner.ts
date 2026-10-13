@@ -215,22 +215,27 @@ export async function scanGameList(
 			.bind(pagesFetched > 0 ? ts : null, status, ts + nextDelayMs, game.appid)
 			.run();
 
-		// --- queue top-N by current sell_listings (INSERT OR IGNORE) -------------
+		// --- queue stale top-N details; fresh items are not re-enqueued -----------
 		if (scanned.length > 0) {
 			scanned.sort((a, b) => b.sellListings - a.sellListings);
 			const top = scanned.slice(0, cfg.scan.detailsTopN);
+			const detailFreshAfter = ts - cfg.spread.detailFreshMs;
 			const queueStmts = top.map((s, idx) =>
 				db
 					.prepare(
 						`INSERT OR IGNORE INTO scan_queue (item_id, appid, priority, due_at, attempts)
-						 VALUES (?, ?, ?, 0, 0)`
+						 SELECT ?, ?, ?, 0, 0
+						 WHERE NOT EXISTS (
+							SELECT 1 FROM item_latest_state
+							WHERE item_id = ? AND detail_at >= ?
+						)`
 					)
-					.bind(s.itemId, game.appid, idx + 1)
+					.bind(s.itemId, game.appid, idx + 1, s.itemId, detailFreshAfter)
 			);
 			for (const part of chunk(queueStmts, D1_BATCH_LIMIT)) {
-				await db.batch(part);
+				const inserted = await db.batch(part);
+				result.queuedForDetails += inserted.reduce((sum, row) => sum + (row.meta.changes ?? 0), 0);
 			}
-			result.queuedForDetails = top.length;
 		}
 
 		result.status = stoppedByBudget && status === 'ok' ? 'partial' : status;

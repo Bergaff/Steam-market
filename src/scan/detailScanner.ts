@@ -24,9 +24,9 @@ import { upsertStateDetail, touchDetailAt, type LatestStateRow } from '../db/lat
 const MERGE_WINDOW_MS = 15 * 60 * 1000;
 /** Failed items are retried after this delay. */
 const RETRY_DELAY_MS = 10 * 60 * 1000;
-/** Items without an order book (no item_nameid) are re-checked rarely. */
-const NO_ORDERBOOK_DELAY_MS = 6 * 60 * 60 * 1000;
-/** Drop queue entries after this many failed attempts. */
+/** Long backoff for items without an order book or repeatedly missing volume. */
+const LONG_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
+/** Switch repeated failures/missing-volume retries to a long cooldown. */
 const MAX_ATTEMPTS = 4;
 /** Touch `detail_at` at most this often when values did not move. */
 const DETAIL_TOUCH_MIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
@@ -39,6 +39,10 @@ export interface DetailScanResult {
 	skippedUnchanged: number;
 	/** Items whose Steam response arrived in a currency other than configured. */
 	currencyMismatches: number;
+	/** Items for which priceoverview supplied a parseable 24h volume. */
+	volumeRetrieved: number;
+	/** Detail attempts completed without a parseable priceoverview volume. */
+	volumeMissing: number;
 	stoppedByBudget: boolean;
 	error?: string;
 }
@@ -65,6 +69,8 @@ export async function processDetailQueue(
 		written: 0,
 		skippedUnchanged: 0,
 		currencyMismatches: 0,
+		volumeRetrieved: 0,
+		volumeMissing: 0,
 		stoppedByBudget: false,
 	};
 
@@ -76,15 +82,18 @@ export async function processDetailQueue(
 			 FROM scan_queue q
 			 JOIN items i ON i.id = q.item_id
 			 WHERE q.due_at <= ?
-			 ORDER BY q.appid ASC, q.priority ASC
+			 ORDER BY q.due_at ASC, q.priority ASC, q.appid ASC, q.item_id ASC
 			 LIMIT ?`
 		)
 		.bind(nowMs(), limit)
 		.all<QueueRow>();
 
 	for (const row of due.results) {
-		// Each item needs up to 3 Steam requests (nameid page, histogram, overview).
-		if (!budget.canAfford(2)) {
+		// Reserve every request needed to finish the item, including priceoverview
+		// (the source of volume); never spend the last slot on nameid/histogram
+		// and then silently finish without fetching volume.
+		const requiredRequests = row.item_nameid === null ? 3 : 2;
+		if (!budget.canAfford(requiredRequests)) {
 			result.stoppedByBudget = true;
 			break;
 		}
@@ -102,9 +111,8 @@ export async function processDetailQueue(
 					// No order book for this item — check again much later.
 					await db
 						.prepare('UPDATE scan_queue SET attempts = attempts + 1, due_at = ?, last_error = ? WHERE item_id = ?')
-						.bind(nowMs() + NO_ORDERBOOK_DELAY_MS, 'item_nameid not found (no order book?)', row.item_id)
+						.bind(nowMs() + LONG_RETRY_DELAY_MS, 'item_nameid not found (no order book?)', row.item_id)
 						.run();
-					await db.prepare('DELETE FROM scan_queue WHERE item_id = ? AND attempts >= ?').bind(row.item_id, MAX_ATTEMPTS).run();
 					result.processed++;
 					result.failed++;
 					continue;
@@ -136,7 +144,7 @@ export async function processDetailQueue(
 				result.currencyMismatches++;
 				await db
 					.prepare('UPDATE scan_queue SET due_at = ?, last_error = ? WHERE item_id = ?')
-					.bind(nowMs() + NO_ORDERBOOK_DELAY_MS, `currency mismatch: got ${detectedCur}, expected ${expectedIso}`, row.item_id)
+					.bind(nowMs() + LONG_RETRY_DELAY_MS, `currency mismatch: got ${detectedCur}, expected ${expectedIso}`, row.item_id)
 					.run();
 				continue;
 			}
@@ -145,6 +153,8 @@ export async function processDetailQueue(
 			const buyCents = hist?.highestBuyCents ?? null;
 			const sellCents = hist?.lowestSellCents ?? overview?.lowestPriceCents ?? null;
 			const volume = overview?.volume24h ?? null;
+			if (volume !== null) result.volumeRetrieved++;
+			else result.volumeMissing++;
 			const median = overview?.medianPriceCents ?? null;
 
 			// --- 4. Delta gate: write only when the order book moved ------------
@@ -219,7 +229,18 @@ export async function processDetailQueue(
 				result.written++;
 			}
 
-			await db.prepare('DELETE FROM scan_queue WHERE item_id = ?').bind(row.item_id).run();
+			if (volume === null) {
+				// A successful histogram alone is not enough: keep retrying the
+				// priceoverview source of volume instead of marking this item fresh.
+				const nextAttempt = row.attempts + 1;
+				const retryDelay = nextAttempt >= MAX_ATTEMPTS ? LONG_RETRY_DELAY_MS : RETRY_DELAY_MS;
+				await db
+					.prepare('UPDATE scan_queue SET attempts = ?, due_at = ?, last_error = ? WHERE item_id = ?')
+					.bind(nextAttempt, nowMs() + retryDelay, 'priceoverview volume missing', row.item_id)
+					.run();
+			} else {
+				await db.prepare('DELETE FROM scan_queue WHERE item_id = ?').bind(row.item_id).run();
+			}
 			result.processed++;
 			result.succeeded++;
 		} catch (err) {
@@ -229,11 +250,12 @@ export async function processDetailQueue(
 			result.processed++;
 			result.failed++;
 			const message = err instanceof Error ? err.message : String(err);
+			const nextAttempt = row.attempts + 1;
+			const retryDelay = nextAttempt >= MAX_ATTEMPTS ? LONG_RETRY_DELAY_MS : RETRY_DELAY_MS;
 			await db
-				.prepare('UPDATE scan_queue SET attempts = attempts + 1, due_at = ?, last_error = ? WHERE item_id = ?')
-				.bind(nowMs() + RETRY_DELAY_MS, message.slice(0, 400), row.item_id)
+				.prepare('UPDATE scan_queue SET attempts = ?, due_at = ?, last_error = ? WHERE item_id = ?')
+				.bind(nextAttempt, nowMs() + retryDelay, message.slice(0, 400), row.item_id)
 				.run();
-			await db.prepare('DELETE FROM scan_queue WHERE item_id = ? AND attempts >= ?').bind(row.item_id, MAX_ATTEMPTS).run();
 		}
 	}
 

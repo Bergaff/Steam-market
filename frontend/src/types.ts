@@ -96,9 +96,10 @@ export interface ItemsResponse {
 export interface ActivityPoint {
 	t: number;
 	t_iso: string;
-	volume_24h_sum: number;
+	volume_24h_sum: number | null;
 	listings_avg: number;
 	items: number;
+	volume_items: number;
 }
 
 export interface ActivityResponse {

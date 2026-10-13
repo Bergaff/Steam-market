@@ -183,11 +183,15 @@ function summarizeForState(s: TickSummary): object {
 		games: s.gamesScanned.map((g) => ({ appid: g.appid, status: g.status, seen: g.itemsSeen, snaps: g.snapshotsInserted, error: g.error })),
 		details: s.details
 			? {
+					processed: s.details.processed,
 					ok: s.details.succeeded,
 					failed: s.details.failed,
 					wrote: s.details.written,
 					flat: s.details.skippedUnchanged,
 					currencyMismatches: s.details.currencyMismatches,
+					volumeRetrieved: s.details.volumeRetrieved,
+					volumeMissing: s.details.volumeMissing,
+					stoppedByBudget: s.details.stoppedByBudget,
 				}
 			: undefined,
 		spread: s.spread ? { active: s.spread.qualifying, off: s.spread.deactivated } : undefined,
