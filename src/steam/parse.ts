@@ -420,14 +420,31 @@ export function parseHistogram(json: unknown): ParsedHistogram | null {
 
 /**
  * Extract the market item_nameid from a listing page.
- * The page embeds `Market_LoadOrderSpread( 1234567 );` when order books exist.
+ * The current known format is `Market_LoadOrderSpread( 1234567 );`.
  */
 export function parseItemNameid(html: string | null | undefined): number | null {
 	if (!html) return null;
 	const m = html.match(/Market_LoadOrderSpread\(\s*(\d+)\s*\)/);
 	if (m && m[1]) return parseInt(m[1], 10);
-	// Some pages expose it via ItemMarketDefinition / data attribute.
 	const m2 = html.match(/"item_nameid"\s*:\s*"?(\d+)"?/);
 	if (m2 && m2[1]) return parseInt(m2[1], 10);
 	return null;
+}
+
+/** Return a compact, non-sensitive page-shape label for failed extraction. */
+export function classifyItemNameidPage(html: string | null | undefined): string {
+	if (!html?.trim()) return 'empty_response';
+	if (/captcha|access denied|verify you are human|too many requests|temporarily blocked/i.test(html)) {
+		return 'challenge_or_block_page';
+	}
+	// These broader signatures are deliberately only diagnostic. If either is
+	// present after parseItemNameid returned null, it points to an unhandled
+	// spelling without storing or exposing the HTML itself.
+	if (/Market_LoadOrderSpread\s*\(\s*(['"]?)\d+\1\s*\)/i.test(html)) return 'orderbook_id_format_variant';
+	if (/["']item_nameid["']\s*:\s*["']?\d+/i.test(html)) return 'item_nameid_field_format_variant';
+	if (/Market_LoadOrderSpread\s*\(/i.test(html)) return 'orderbook_marker_without_numeric_id';
+	if (/item_nameid|itemNameId|data-item-nameid|g_rgItemNameID/i.test(html)) return 'nameid_marker_without_parseable_id';
+	if (/<html\b|<!doctype\s+html/i.test(html)) return 'html_without_nameid_marker';
+	if (/^\s*[\[{]/.test(html)) return 'json_or_object_without_nameid';
+	return 'unrecognized_response';
 }

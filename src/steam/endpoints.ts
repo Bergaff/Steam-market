@@ -10,6 +10,7 @@ import {
 	parsePriceOverview,
 	parseHistogram,
 	parseItemNameid,
+	classifyItemNameidPage,
 	type ParsedMarketItem,
 	type ParsedPriceOverview,
 	type ParsedHistogram,
@@ -103,14 +104,26 @@ export async function fetchOrdersHistogram(
 	return parseHistogram(json);
 }
 
+/** A successful listing-page response that contained no parseable item_nameid. */
+export class ItemNameidNotFoundError extends Error {
+	constructor(pageShape: string, responseLength: number) {
+		super(`item_nameid not found (${pageShape}, ${responseLength} chars)`);
+		this.name = 'ItemNameidNotFoundError';
+	}
+}
+
 /** Worker 2: one-time fetch of item_nameid from the listing page HTML. */
 export async function fetchItemNameid(
 	client: SteamClient,
 	appid: number,
 	marketHashName: string,
 	itemId?: number
-): Promise<number | null> {
+): Promise<number> {
 	const url = itemListingsPageUrl(appid, marketHashName);
 	const html = await client.getText(url, 'item_page', { appid, itemId: itemId ?? null });
-	return parseItemNameid(html);
+	const itemNameid = parseItemNameid(html);
+	if (itemNameid !== null) return itemNameid;
+	// Keep parse failures separate from HTTP failures so they remain on the
+	// conservative long retry cooldown, while diagnostics record response shape.
+	throw new ItemNameidNotFoundError(classifyItemNameidPage(html), html.length);
 }

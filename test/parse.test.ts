@@ -7,6 +7,7 @@ import {
 	parseHistogram,
 	parseOrderTable,
 	parseItemNameid,
+	classifyItemNameidPage,
 	stripHtml,
 } from '../src/steam/parse';
 
@@ -229,10 +230,20 @@ describe('parseItemNameid', () => {
 		expect(parseItemNameid('"item_nameid":123457')).toBe(123457);
 	});
 
-	it('returns null when there is no order book', () => {
+	it('returns null when there is no supported order-book marker', () => {
 		expect(parseItemNameid('<html>nothing here</html>')).toBeNull();
+		expect(parseItemNameid('Market_LoadOrderSpread ( 123458 )')).toBeNull();
 		expect(parseItemNameid('')).toBeNull();
 		expect(parseItemNameid(null)).toBeNull();
+	});
+
+	it('classifies unmatched pages without exposing page contents', () => {
+		expect(classifyItemNameidPage('')).toBe('empty_response');
+		expect(classifyItemNameidPage('Market_LoadOrderSpread ( 123459 )')).toBe('orderbook_id_format_variant');
+		expect(classifyItemNameidPage("'item_nameid': '123460'")).toBe('item_nameid_field_format_variant');
+		expect(classifyItemNameidPage('<html>listing but no ID</html>')).toBe('html_without_nameid_marker');
+		expect(classifyItemNameidPage('{"error":"blocked"}')).toBe('json_or_object_without_nameid');
+		expect(classifyItemNameidPage('<html>captcha</html>')).toBe('challenge_or_block_page');
 	});
 });
 

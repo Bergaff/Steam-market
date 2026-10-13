@@ -13,7 +13,12 @@
 
 import type { RuntimeConfig } from '../config';
 import type { SteamClient } from '../steam/client';
-import { fetchItemNameid, fetchOrdersHistogram, fetchPriceOverview } from '../steam/endpoints';
+import {
+	fetchItemNameid,
+	fetchOrdersHistogram,
+	fetchPriceOverview,
+	ItemNameidNotFoundError,
+} from '../steam/endpoints';
 import { isWrongCurrency, steamCurrencyToIso } from '../steam/parse';
 import { chunk, nowMs } from '../lib/time';
 import type { WorkBudget } from './budget';
@@ -131,6 +136,7 @@ export async function processDetailQueue(
 		try {
 			let nameid = row.item_nameid;
 			let nameidMissing = false;
+			let nameidParseError: string | null = null;
 			let requestError: unknown = null;
 			let rateLimitError: Error | null = null;
 			let orderbookDeferred = false;
@@ -152,7 +158,8 @@ export async function processDetailQueue(
 				try {
 					nameid = await fetchItemNameid(client, row.appid, row.hash_name, row.item_id);
 				} catch (err) {
-					requestError ??= err;
+					if (err instanceof ItemNameidNotFoundError) nameidParseError = err.message;
+					else requestError ??= err;
 					if (err instanceof Error && err.name === 'RateLimitedError') rateLimitError = err;
 				} finally {
 					budget.consume();
@@ -292,7 +299,7 @@ export async function processDetailQueue(
 
 			const retryReasons: string[] = [];
 			if (volume === null) retryReasons.push('priceoverview volume missing');
-			if (nameidMissing) retryReasons.push('item_nameid not found');
+			if (nameidMissing) retryReasons.push(nameidParseError ?? 'item_nameid not found');
 			else if (orderbookDeferred) retryReasons.push('orderbook check deferred by request budget');
 			else if (nameid !== null && !hist) retryReasons.push('orderbook unavailable');
 			if (requestError instanceof Error) retryReasons.push(requestError.message);

@@ -4,11 +4,20 @@ import { WorkBudget } from '../src/scan/budget';
 import type { RuntimeConfig } from '../src/config';
 import type { SteamClient } from '../src/steam/client';
 
-const endpointMocks = vi.hoisted(() => ({
-	fetchPriceOverview: vi.fn(),
-	fetchItemNameid: vi.fn(),
-	fetchOrdersHistogram: vi.fn(),
-}));
+const endpointMocks = vi.hoisted(() => {
+	class ItemNameidNotFoundError extends Error {
+		constructor(pageShape: string, responseLength: number) {
+			super(`item_nameid not found (${pageShape}, ${responseLength} chars)`);
+			this.name = 'ItemNameidNotFoundError';
+		}
+	}
+	return {
+		fetchPriceOverview: vi.fn(),
+		fetchItemNameid: vi.fn(),
+		fetchOrdersHistogram: vi.fn(),
+		ItemNameidNotFoundError,
+	};
+});
 
 vi.mock('../src/steam/endpoints', () => endpointMocks);
 
@@ -74,7 +83,7 @@ describe('processDetailQueue', () => {
 		});
 		endpointMocks.fetchItemNameid.mockImplementation(async () => {
 			order.push('item_page');
-			return null;
+			throw new endpointMocks.ItemNameidNotFoundError('html_without_nameid', 256);
 		});
 
 		const { db, executions, batchedSql } = makeDb();
@@ -95,5 +104,6 @@ describe('processDetailQueue', () => {
 		expect(batchedSql.some((sql) => sql.includes('INSERT INTO price_snapshots'))).toBe(true);
 		const retry = executions.find(({ sql }) => sql.includes('UPDATE scan_queue SET attempts'));
 		expect(retry?.bindings.at(-2)).toContain('item_nameid not found');
+		expect(retry?.bindings.at(-2)).toContain('html_without_nameid');
 	});
 });
