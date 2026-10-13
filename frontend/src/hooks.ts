@@ -11,7 +11,7 @@ export interface AsyncState<T> {
  * Fetch-on-mount + manual refresh + optional polling.
  * Cancels in-flight requests on unmount / param change.
  */
-export function useFetch<T>(fetcher: () => Promise<T>, pollMs?: number): AsyncState<T> {
+export function useFetch<T>(fetcher: () => Promise<T>, pollMs?: number, watchKey?: unknown): AsyncState<T> {
 	const [data, setData] = useState<T | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -46,7 +46,7 @@ export function useFetch<T>(fetcher: () => Promise<T>, pollMs?: number): AsyncSt
 			cancelled = true;
 			if (timer) clearInterval(timer);
 		};
-	}, [nonce, pollMs]);
+	}, [nonce, pollMs, watchKey]);
 
 	const refresh = useCallback(() => setNonce((n) => n + 1), []);
 	return { data, loading, error, refresh };

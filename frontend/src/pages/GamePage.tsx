@@ -36,8 +36,8 @@ export default function GamePage() {
 
 	const LIMIT = 50;
 
-	const details = useFetch<GameDetailsResponse>(() => api.game(appid));
-	const activity = useFetch(() => api.gameActivity(appid, period), undefined);
+	const details = useFetch<GameDetailsResponse>(() => api.game(appid), 60_000, appid);
+	const activity = useFetch(() => api.gameActivity(appid, period), 60_000, `${appid}:${period}`);
 	const stats = useFetch(() => api.stats(), 60_000);
 	const currency = stats.data?.currency ?? 'RUB';
 
@@ -54,7 +54,7 @@ export default function GamePage() {
 		[page, sort, dir, debPrice, debVolume, debSpread]
 	);
 
-	const items = useFetch(() => api.gameItems(appid, query));
+	const items = useFetch(() => api.gameItems(appid, query), 60_000, query);
 
 	if (Number.isNaN(appid)) return <ErrorNote message="Некорректный appid" />;
 

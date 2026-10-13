@@ -12,11 +12,11 @@ export default function ItemPage() {
 	const itemId = parseInt(idRaw ?? '', 10);
 	const [period, setPeriod] = useState('24h');
 
-	const details = useFetch(() => api.item(itemId));
+	const details = useFetch(() => api.item(itemId), 60_000, itemId);
 	const currencyStats = useFetch(() => api.stats(), 60_000);
 	const currency = currencyStats.data?.currency ?? 'RUB';
-	const history = useFetch(() => api.itemHistory(itemId, period));
-	const snapshots = useFetch(() => api.itemSnapshots(itemId, 20));
+	const history = useFetch(() => api.itemHistory(itemId, period), 60_000, `${itemId}:${period}`);
+	const snapshots = useFetch(() => api.itemSnapshots(itemId, 20), 60_000, itemId);
 
 	if (Number.isNaN(itemId)) return <ErrorNote message="Некорректный id предмета" />;
 

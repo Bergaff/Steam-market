@@ -42,7 +42,7 @@ export default function OpportunitiesPage() {
 		[page, sort, debProfit, debVolume, appidFilter]
 	);
 
-	const opps = useFetch(() => api.opportunities(query), 60_000);
+	const opps = useFetch(() => api.opportunities(query), 60_000, query);
 	const currency = opps.data?.currency ?? 'RUB';
 
 	return (

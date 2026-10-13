@@ -3,7 +3,7 @@
 export interface GameStats {
 	items: number;
 	sell_listings: number;
-	volume_24h: number;
+	volume_24h: number | null;
 	active_opportunities: number;
 }
 

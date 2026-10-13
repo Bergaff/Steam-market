@@ -42,7 +42,8 @@ function gameDto(row: GameListRow) {
 		stats: {
 			items: row.items_count ?? 0,
 			sell_listings: row.sell_listings ?? 0,
-			volume_24h: row.volume_24h ?? 0,
+			// NULL means no detail scan has supplied market volume yet; do not present it as a real zero.
+			volume_24h: row.volume_24h,
 			active_opportunities: row.opportunities ?? 0,
 		},
 	};
@@ -59,7 +60,7 @@ const GAME_LIST_SQL = `
 	  SELECT i.appid,
 	         COUNT(*)                          AS items_count,
 	         SUM(COALESCE(s.sell_listings, 0)) AS sell_listings,
-	         SUM(COALESCE(s.volume_24h, 0))    AS volume_24h
+	         SUM(s.volume_24h)                 AS volume_24h
 	  FROM items i
 	  LEFT JOIN item_latest_state s ON s.item_id = i.id
 	  GROUP BY i.appid
