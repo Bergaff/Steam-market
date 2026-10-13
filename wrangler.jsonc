@@ -1,0 +1,83 @@
+{
+	// Steam Market Analytics — Cloudflare Worker (API + static frontend)
+	//
+	// Деплой через Workers Builds (git):
+	//   Достаточно дефолтной команды деплоя `npx wrangler deploy` —
+	//   секция "build" ниже сама соберёт фронтенд (frontend/dist) перед деплоем.
+	//   NODE_VERSION=22 (определяется автоматически по .nvmrc).
+	// Одноразово после первого деплоя:
+	//   1. npx wrangler secret put ADMIN_API_KEY   (или Dashboard -> Settings -> Variables)
+	//   2. npm run db:migrate:remote               (схема + сид игр в боевую D1)
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "steam-market",
+	"main": "src/index.ts",
+	"build": {
+		// Runs automatically before `wrangler deploy` / `wrangler dev`
+		// (fixes Workers Builds failing on missing frontend/dist).
+		"command": "npm run build"
+	},
+	"compatibility_date": "2025-05-05",
+	"observability": {
+		"enabled": true
+	},
+	"assets": {
+		"directory": "./frontend/dist",
+		"binding": "ASSETS",
+		"html_handling": "auto-trailing-slash",
+		"not_found_handling": "single-page-application",
+		// API и healthcheck всегда обрабатываются кодом воркера, а не ассетами
+		"run_worker_first": ["/api/*", "/health"]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "steam-market-db",
+			"database_id": "222b1b78-618f-4cb7-a6ba-6c76da47516e",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Планировщик: одна минута — «тикер», внутри него воркеры сами решают,
+	// какую игру сканировать (5/15/30 мин по тирам), какие предметы детализировать
+	// и когда запускать детектор спредов (каждые 2 минуты).
+	"triggers": {
+		"crons": ["* * * * *"]
+	},
+	// Не-секретная конфигурация (все значения — строки). Секреты: ADMIN_API_KEY через
+	// `wrangler secret put` (в проде) или .dev.vars (локально).
+	"vars": {
+		"STEAM_CURRENCY": "1",
+		"STEAM_LANGUAGE": "russian",
+		"STEAM_COUNTRY": "BY",
+		"SCAN_USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+		// STEAM_WEB_COOKIE still receives occasional 429s. Keep a hard cap of 20
+		// calls/tick: two list scans × 4 pages use at most 8, reserving capacity
+		// for histogram + priceoverview details (the source of volume/buy data).
+		// 6s pacing; repeated 429s back off 5→10→20→40→60 min.
+		// Cookie помогает с валютой, но не отменяет IP rate limits Cloudflare.
+		// Не ускорять профиль, пока 429 не исчезнут минимум на сутки.
+		"MIN_REQUEST_INTERVAL_MS": "6000",
+		"MAX_STEAM_REQUESTS_PER_RUN": "20",
+		"MAX_RUN_WALL_MS": "540000",
+		"SCAN_PAGES_PER_GAME": "4",
+		"SCAN_ITEMS_PER_PAGE": "100",
+		"DETAILS_TOP_N": "20",
+		"DETAILS_PER_TICK": "6",
+		// D1 write saving: snapshot even for flat prices at least every 4h
+		"SNAPSHOT_HEARTBEAT_MS": "14400000",
+		"MIN_SPREAD_PCT": "10",
+		"MIN_VOLUME_24H": "5",
+		"MIN_BUY_PRICE_CENTS": "500",
+		"SNAPSHOT_MAX_AGE_MS": "10800000",
+		"DETAIL_FRESH_MS": "43200000",
+		"SPREAD_INTERVAL_MS": "120000",
+		"LOG_SUCCESS_SAMPLE_N": "10",
+		"RATE_LIMIT_PER_MIN": "60",
+		"RETENTION_DAYS": "35",
+		"RETRY_AFTER_429_MS": "60000",
+		"LONG_PAUSE_AFTER_429_COUNT": "3",
+		"LONG_PAUSE_MS": "300000",
+		"LONG_PAUSE_MAX_MS": "3600000",
+		"PROXY_URL": "",
+		"DEMO_MODE": "0"
+	}
+}
