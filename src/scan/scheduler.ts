@@ -15,7 +15,7 @@
 import type { Env } from '../env';
 import type { RuntimeConfig } from '../config';
 import { nowMs } from '../lib/time';
-import { STATE_KEYS, getStateInt, setState, incrementState, getState } from '../db/state';
+import { STATE_KEYS, getStateInt, setState, incrementState, getState, acquireSchedulerLock } from '../db/state';
 import { createSteamClient } from './clientFactory';
 import { WorkBudget } from './budget';
 import { pickDueGames, scanGameList, type ListScanResult } from './listScanner';
@@ -96,15 +96,14 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 	}
 
 	// ------------------------------------------------------------------ lock
-	// Best-effort overlap guard: skip if a previous tick is still running.
-	const lockSince = await getStateInt(db, 'tick_lock_since');
+	// Atomic D1 lease: a read-then-write lock allowed concurrent cron events
+	// to race and burst requests from separate SteamClients onto one IP.
 	const lockMaxAgeMs = cfg.scan.maxRunWallMs + 60_000;
-	if (lockSince > 0 && now - lockSince < lockMaxAgeMs) {
+	if (!(await acquireSchedulerLock(db, now, lockMaxAgeMs))) {
 		summary.skipped = 'locked';
 		summary.durationMs = Date.now() - started;
 		return summary;
 	}
-	await setState(db, 'tick_lock_since', now);
 
 	const client = createSteamClient(db, cfg);
 	const budget = new WorkBudget(cfg.scan.maxRequestsPerRun, cfg.scan.maxRunWallMs, now);
@@ -165,7 +164,7 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 	} finally {
 		summary.steamRequests = client.requests;
 		summary.steamErrors = client.errors;
-		await setState(db, 'tick_lock_since', 0);
+		await setState(db, STATE_KEYS.tickLockSince, 0);
 		await setState(db, STATE_KEYS.lastTickAt, now);
 		summary.durationMs = Date.now() - started;
 		await setState(db, STATE_KEYS.lastTickSummary, JSON.stringify(summarizeForState(summary)));

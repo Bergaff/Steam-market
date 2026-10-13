@@ -69,6 +69,13 @@ export async function healthHandler(c: AppContext): Promise<Response> {
 	const body = {
 		status: !dbOk ? 'down' : paused ? 'paused' : degraded ? 'degraded' : 'ok',
 		demo_mode: cfg.demoMode,
+		scan_limits: {
+			min_request_interval_ms: cfg.scan.minRequestIntervalMs,
+			max_steam_requests_per_run: cfg.scan.maxRequestsPerRun,
+			max_run_wall_ms: cfg.scan.maxRunWallMs,
+			scan_pages_per_game: cfg.scan.pagesPerGame,
+			details_per_tick: cfg.scan.detailsPerTick,
+		},
 		db: dbOk,
 		steam_cookie_configured: cfg.steam.webCookie !== null,
 		last_successful_scan_at: lastScan,

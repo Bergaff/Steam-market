@@ -21,6 +21,7 @@ export const STATE_KEYS = {
 	totalSteamErrors: 'total_steam_errors',
 	lastTickAt: 'last_tick_at',
 	lastTickSummary: 'last_tick_summary',
+	tickLockSince: 'tick_lock_since',
 } as const;
 
 export async function getState(db: D1Database, key: string): Promise<string | null> {
@@ -52,6 +53,20 @@ export async function incrementState(db: D1Database, key: string, by = 1): Promi
 		)
 		.bind(key, String(by), Date.now())
 		.run();
+}
+
+/** Atomically acquire the scheduler lease, preventing simultaneous cron ticks. */
+export async function acquireSchedulerLock(db: D1Database, now: number, maxAgeMs: number): Promise<boolean> {
+	const result = await db
+		.prepare(
+			`INSERT INTO scheduler_state (key, value, updated_at) VALUES (?, ?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+			 WHERE CAST(scheduler_state.value AS INTEGER) = 0
+			    OR CAST(scheduler_state.value AS INTEGER) <= ?`
+		)
+		.bind(STATE_KEYS.tickLockSince, String(now), now, now - maxAgeMs)
+		.run();
+	return (result.meta.changes ?? 0) === 1;
 }
 
 export async function getAllState(db: D1Database): Promise<Record<string, string>> {
