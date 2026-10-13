@@ -16,6 +16,7 @@ import type { Env } from '../env';
 import type { RuntimeConfig } from '../config';
 import { nowMs } from '../lib/time';
 import { STATE_KEYS, getStateInt, setState, incrementState, getState, acquireSchedulerLock } from '../db/state';
+import { recordSchedulerTick } from '../db/tickLog';
 import { createSteamClient } from './clientFactory';
 import { WorkBudget } from './budget';
 import { pickDueGames, scanGameList, type ListScanResult } from './listScanner';
@@ -62,6 +63,19 @@ export function compute429PauseMs(cfg: RuntimeConfig, hits: number, retryAfterMs
 	return Math.max(retryAfterMs, Math.min(doubled, rl.longPauseMaxMs));
 }
 
+async function persistTickHistory(db: D1Database, summary: TickSummary): Promise<void> {
+	await recordSchedulerTick(db, {
+		startedAt: summary.ranAt,
+		mode: summary.mode,
+		skipped: summary.skipped ?? null,
+		steamRequests: summary.steamRequests,
+		steamErrors: summary.steamErrors,
+		durationMs: summary.durationMs,
+		error: summary.error ?? null,
+		summary: summarizeForState(summary),
+	});
+}
+
 export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Promise<TickSummary> {
 	const started = Date.now();
 	const now = nowMs();
@@ -82,6 +96,7 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 		await setState(db, STATE_KEYS.lastTickAt, now);
 		await setState(db, STATE_KEYS.lastTickSummary, JSON.stringify(summarizeForState(summary)));
 		summary.durationMs = Date.now() - started;
+		await persistTickHistory(db, summary);
 		return summary;
 	}
 
@@ -92,6 +107,7 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 		summary.pausedUntil = pausedUntil;
 		await setState(db, STATE_KEYS.lastTickAt, now);
 		summary.durationMs = Date.now() - started;
+		await persistTickHistory(db, summary);
 		return summary;
 	}
 
@@ -102,6 +118,7 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 	if (!(await acquireSchedulerLock(db, now, lockMaxAgeMs))) {
 		summary.skipped = 'locked';
 		summary.durationMs = Date.now() - started;
+		await persistTickHistory(db, summary);
 		return summary;
 	}
 
@@ -168,6 +185,7 @@ export async function runSchedulerTick(db: D1Database, cfg: RuntimeConfig): Prom
 		await setState(db, STATE_KEYS.lastTickAt, now);
 		summary.durationMs = Date.now() - started;
 		await setState(db, STATE_KEYS.lastTickSummary, JSON.stringify(summarizeForState(summary)));
+		await persistTickHistory(db, summary);
 	}
 
 	return summary;

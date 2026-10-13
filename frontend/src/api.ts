@@ -3,6 +3,7 @@
 import type {
 	ActivityResponse,
 	AppConfig,
+	DiagnosticsResponse,
 	GameDetailsResponse,
 	GameListResponse,
 	HistoryResponse,
@@ -80,6 +81,7 @@ export const api = {
 	opportunities: (q: OpportunitiesQuery = {}) =>
 		get<OpportunityListResponse>(`/opportunities${qs(q as Record<string, string | number | null | undefined>)}`),
 	stats: () => get<StatsOverview>('/stats/overview'),
+	diagnostics: () => get<DiagnosticsResponse>('/diagnostics'),
 	/** Direct link for the CSV export button (browser download). */
 	opportunitiesCsvUrl: (q: OpportunitiesQuery = {}) => `${BASE}/opportunities${qs({ ...q, format: 'csv' } as Record<string, string | number | null | undefined>)}`,
 };

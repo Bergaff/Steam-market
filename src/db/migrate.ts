@@ -1,5 +1,5 @@
 /**
- * Embedded schema bootstrap — mirrors migrations/0001+0002+0003 as a list of
+ * Embedded schema bootstrap — mirrors migrations/0001–0004 as a list of
  * idempotent statements, so a fresh D1 database can be initialized through
  * the Worker itself (POST /api/v1/migrate) without wrangler CLI or the D1
  * web console.
@@ -7,6 +7,8 @@
  * Keep in sync with the migration files. All statements are safe to re-run
  * (IF NOT EXISTS / OR IGNORE).
  */
+
+import { TICK_LOG_CREATE_INDEX, TICK_LOG_CREATE_TABLE } from './tickLog';
 
 export const SCHEMA_STATEMENTS: string[] = [
 	// --- games ---------------------------------------------------------------
@@ -104,6 +106,10 @@ export const SCHEMA_STATEMENTS: string[] = [
 	  value      TEXT NOT NULL,
 	  updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
 	)`,
+
+	// --- scheduler_tick_log (migration 0004) -----------------------------------------------
+	TICK_LOG_CREATE_TABLE,
+	TICK_LOG_CREATE_INDEX,
 
 	// --- item_latest_state (migration 0003) --------------------------------------------------
 	`CREATE TABLE IF NOT EXISTS item_latest_state (

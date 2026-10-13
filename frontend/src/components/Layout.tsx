@@ -15,6 +15,7 @@ const NAV = [
 	{ to: '/', label: 'Дашборд', end: true },
 	{ to: '/games', label: 'Игры', end: false },
 	{ to: '/opportunities', label: 'Возможности', end: false },
+	{ to: '/diagnostics', label: 'Диагностика', end: false },
 ];
 
 export default function Layout() {
@@ -114,6 +115,9 @@ export default function Layout() {
 						<a className="hover:text-accent" href="/health" target="_blank" rel="noreferrer">
 							Health
 						</a>
+						<NavLink className="hover:text-accent" to="/diagnostics">
+							Отчёт диагностики
+						</NavLink>
 						<span className="opacity-60">Не является офертой. Не связан с Valve Corporation.</span>
 					</p>
 				</div>

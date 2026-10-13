@@ -12,6 +12,7 @@ import games from './games';
 import items from './items';
 import opportunities from './opportunities';
 import stats from './stats';
+import diagnostics from './diagnostics';
 import admin from './admin';
 
 type Ctx = { Bindings: Env; Variables: { cfg: RuntimeConfig } };
@@ -165,6 +166,7 @@ api.route('/games', games);
 api.route('/items', items);
 api.route('/opportunities', opportunities);
 api.route('/stats', stats);
+api.route('/diagnostics', diagnostics);
 api.route('/admin', admin);
 
 api.get('/', (c) =>
@@ -184,6 +186,7 @@ api.get('/', (c) =>
 			'GET /api/v1/items/:id/snapshots?limit',
 			'GET /api/v1/opportunities?min_profit_pct&min_volume&appid&sort&dir&limit&offset&format=json|csv',
 			'GET /api/v1/stats/overview',
+			'GET /api/v1/diagnostics',
 			'GET /health',
 			'POST /api/v1/admin/games            (X-Admin-Key)',
 			'PATCH /api/v1/admin/games/:appid     (X-Admin-Key)',
