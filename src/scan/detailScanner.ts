@@ -104,7 +104,8 @@ export async function processDetailQueue(
 			 JOIN items i ON i.id = q.item_id
 			 JOIN games g ON g.appid = q.appid
 			 WHERE q.due_at <= ?
-			 ORDER BY g.tier ASC, q.due_at ASC, q.priority ASC, q.appid ASC, q.item_id ASC
+			 -- Avoid one large stale backlog monopolizing detail slots; prioritize tiers/ranks first.
+			 ORDER BY g.tier ASC, q.priority ASC, q.appid ASC, q.due_at ASC, q.item_id ASC
 			 LIMIT ?`
 		)
 		.bind(nowMs(), limit)
